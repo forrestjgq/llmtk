@@ -1,0 +1,8 @@
+[submodule "backend"]
+	path = backend
+	url = git@github.com:forrestjgq/tensorrtllm_backend.git
+	branch = main
+[submodule "trtllm"]
+	path = trtllm
+	url = git@github.com:forrestjgq/trtllm.git
+	branch = main

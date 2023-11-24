@@ -1,0 +1,67 @@
+ARG BASE_IMAGE=nvcr.io/nvidia/tritonserver
+ARG BASE_TAG=23.10-py3
+
+FROM ${BASE_IMAGE}:${BASE_TAG} as base
+
+# setup proxy and git ids
+ARG proxy_val=""
+ENV http_proxy=$proxy_val
+ENV https_proxy=$proxy_val
+ARG LLMTK_COMMITID=""
+ARG TRTLLM_COMMITID=""
+ARG BACKEND_COMMITID=""
+ENV LLMTK_COMMITID=$LLMTK_COMMITID
+ENV TRTLLM_COMMITID=$TRTLLM_COMMITID
+ENV BACKEND_COMMITID=$BACKEND_COMMITID
+
+RUN apt-get update && apt-get install -y --no-install-recommends rapidjson-dev python-is-python3
+
+COPY backend/requirements.txt /tmp/
+RUN pip3 install -r /tmp/requirements.txt --extra-index-url https://pypi.ngc.nvidia.com
+
+# Remove previous TRT installation
+# We didn't remove libnvinfer* here because tritonserver depends on the pre-installed libraries.
+RUN apt-get remove --purge -y tensorrt*
+RUN pip uninstall -y tensorrt
+
+FROM base as dev
+ARG TRT_VER="9.1.0.4"
+ENV TRT_VER=$TRT_VER
+ARG CUDA_VER="12.2"
+ENV CUDA_VER=$CUDA_VER
+ARG CUDNN_VER="8.9.4.25-1+cuda12.2"
+ENV CUDNN_VER=$CUDNN_VER
+ARG NCCL_VER="2.18.3-1+cuda12.2"
+ENV NCCL_VER=$NCCL_VER
+ARG CUBLAS_VER="12.2.5.6-1"
+ENV CUBLAS_VER=$CUBLAS_VER
+ENV LD_LIBRARY_PATH=/usr/local/tensorrt/targets/x86_64-linux-gnu/lib:${LD_LIBRARY_PATH}
+ENV TRT_ROOT=/usr/local/tensorrt
+
+WORKDIR /app
+COPY script llmtk_script
+COPY src llmtk_src
+COPY trtllm tensorrt_llm
+RUN bash llmtk_script/install.sh
+
+FROM dev as trt_llm_builder
+
+WORKDIR /app
+COPY backend/scripts scripts
+COPY backend/all_models all_models
+RUN cd /app/tensorrt_llm && python3 scripts/build_wheel.py --trt_root="${TRT_ROOT}" -i -c && cd ..
+
+FROM trt_llm_builder as trt_llm_backend_builder
+
+WORKDIR /app/
+COPY backend/inflight_batcher_llm inflight_batcher_llm
+RUN cd inflight_batcher_llm && bash scripts/build.sh && cd ..
+
+FROM trt_llm_backend_builder as final
+
+# Install tensorrtllm backend
+RUN mkdir /opt/tritonserver/backends/tensorrtllm
+COPY --from=trt_llm_backend_builder /app/inflight_batcher_llm/build/libtriton_tensorrtllm.so /opt/tritonserver/backends/tensorrtllm
+
+ENV http_proxy=""
+ENV https_proxy=""
