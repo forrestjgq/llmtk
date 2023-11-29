@@ -1,9 +1,7 @@
-image="nvcr.io/nvidia/pytorch:23.08-py3"
+image="dockerhub.deepglint.com/lse/triton_trt_llm:base-0.1"
 name=$1
 
 # this script will create a docker container for TensorRT-LLM development
-data=/data # to mount
-trtllm=/data/jgq/trtllm # as work directory
 
 docker run \
     --runtime=nvidia\

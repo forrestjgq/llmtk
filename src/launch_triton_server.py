@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import os
 import shutil
@@ -13,7 +14,8 @@ from build_model import add_arguments, build
 def parse_arguments():
     parser = argparse.ArgumentParser()
     # docker will build a default one inside
-    parser.add_argument('--http-port', type=int, default=8000, help='triton server http port')
+    parser.add_argument('--disable-proxy', default=False, action='store_true', help='should proxy be disabled')
+    parser.add_argument('--http-port', type=int, default=8000, help='triton server/proxy http port')
     parser.add_argument('--repo', type=str, default='/app/all_models/inflight_batcher_llm', help='path to backend/all_models/inflight_batcher_llm')
     # by default, user should mount the engine to /engine and run
     parser.add_argument('--engine', type=str, default='/engine', help='path to tensorrt-llm engine to run')
@@ -58,6 +60,10 @@ def detect_model_type(model):
 def read_engine_parameters(engine):
     with open(os.path.join(engine, 'config.json'), 'r') as fp:
         return json.load(fp)
+def read_file(*path, flag='rb'):
+    with open(os.path.join(*path), flag) as fp:
+        return fp.read()
+
 def append_pbtxt(path, d: dict):
     with open(path, 'a') as fp:
         for key, value in d.items():
@@ -85,29 +91,37 @@ def build_triton_repo(repo, engine, model, model_name):
     arch = detect_model_type(model)
     param = read_engine_parameters(args.engine)
 
+    engine_cfg = read_file(args.engine, 'config.json')
+    model_cfg = read_file(args.model, 'config.json')
+    model_cfg = str(base64.b64encode(model_cfg), encoding="utf8")
+    engine_cfg = str(base64.b64encode(engine_cfg), encoding="utf8")
+
+    max_batch_size = param["builder_config"]["max_batch_size"]
     replace(to('preprocessing/config.pbtxt'), {
         "${tokenizer_dir}": model,
         "${tokenizer_type}": arch,
-        "${triton_max_batch_size}": 16
+        "${triton_max_batch_size}": max_batch_size
         })
     replace(to('postprocessing/config.pbtxt'), {
         "${tokenizer_dir}": model,
         "${tokenizer_type}": arch,
-        "${triton_max_batch_size}": 16
+        "${triton_max_batch_size}": max_batch_size
         })
     replace(to('tensorrt_llm/config.pbtxt'), {
         '${decoupled_mode}': 'True',
         "${batching_strategy}": 'inflight_fused_batching',
         "${engine_dir}": engine,
         "${exclude_input_in_output}": "True",
-        "${triton_max_batch_size}": 16,
+        "${triton_max_batch_size}": max_batch_size,
         "${max_queue_delay_microseconds}": 50000,
         })
     append_pbtxt(to('tensorrt_llm/config.pbtxt'), {
         "model_name": model_name,
         "max_input_len": param["builder_config"]["max_input_len"],
         "max_output_len": param["builder_config"]["max_output_len"],
-        "max_batch_size": param["builder_config"]["max_batch_size"],
+        "max_batch_size": max_batch_size,
+        "engine_cfg": engine_cfg,
+        "model_cfg": model_cfg,
     })
         
     replace(to('ensemble/config.pbtxt'), {
@@ -124,8 +138,9 @@ def get_world_size(engine, devices):
 
         cnt = torch.cuda.device_count()
         assert cnt >= world, f'cuda device count {cnt} < world size {world}'
-        devids = [int(s) for s in devices.split(',')]
-        assert len(devids) >= world, f'specified cuda devices {devices} less than world size {world}'
+        if devices:
+            devids = [int(s) for s in devices.split(',')]
+            assert len(devids) >= world, f'specified cuda devices {devices} less than world size {world}'
         
         return world
 
@@ -133,6 +148,7 @@ def get_world_size(engine, devices):
 if __name__ == '__main__':
     args = parse_arguments()
     args.repo = os.path.realpath(args.repo)
+    args.model_name = args.model_name.lower()
 
     if not os.path.exists(os.path.join(args.engine, 'config.json')):
         # engine not present, try building new one
@@ -140,5 +156,9 @@ if __name__ == '__main__':
 
     model_path = build_triton_repo(args.repo, args.engine, args.model, args.model_name)
     world = get_world_size(args.engine, args.devices)
-    cmd = get_cmd(world, args.tritonserver, model_path, args.http_port, args.devices)
+    triton_port = args.http_port
+    if not args.disable_proxy:
+        triton_port = 8001
+        subprocess.call(f'/app/oaip -triton 127.0.0.1:{triton_port} -minloglevel 0 -logtostderr -port {args.http_port} &', shell=True)
+    cmd = get_cmd(world, args.tritonserver, model_path, triton_port, args.devices)
     subprocess.call(cmd, shell=True)

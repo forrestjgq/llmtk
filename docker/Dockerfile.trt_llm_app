@@ -1,0 +1,17 @@
+ARG BASE_IMAGE=dockerhub.deepglint.com/lse/triton_trt_llm
+ARG BASE_TAG=base-v0.1
+
+FROM ${BASE_IMAGE}:${BASE_TAG} as base
+
+ARG LLMTK_COMMITID=""
+ARG TRTLLM_COMMITID=""
+ARG BACKEND_COMMITID=""
+ENV LLMTK_COMMITID=$LLMTK_COMMITID
+ENV TRTLLM_COMMITID=$TRTLLM_COMMITID
+ENV BACKEND_COMMITID=$BACKEND_COMMITID
+
+WORKDIR /app
+COPY script llmtk_script
+COPY src llmtk_src
+COPY backend/all_models all_models
+COPY oaip oaip
