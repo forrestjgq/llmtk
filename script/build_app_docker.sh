@@ -11,7 +11,7 @@ oaip=$1
 root=$(dirname $(dirname $(realpath $0)))
 url=dockerhub.deepglint.com/lse/triton_trt_llm
 base=base-0.1
-tag=app-0.1
+tag=app-0.2
 
 pushd $root
 cp $oaip .

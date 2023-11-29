@@ -14,6 +14,7 @@ from build_model import add_arguments, build
 def parse_arguments():
     parser = argparse.ArgumentParser()
     # docker will build a default one inside
+    parser.add_argument('--gpu-mem-fraction', type=float, default=None, help='how much GPU memory should be used, value range 0~1')
     parser.add_argument('--disable-proxy', default=False, action='store_true', help='should proxy be disabled')
     parser.add_argument('--http-port', type=int, default=8000, help='triton server/proxy http port')
     parser.add_argument('--repo', type=str, default='/app/all_models/inflight_batcher_llm', help='path to backend/all_models/inflight_batcher_llm')
@@ -107,14 +108,18 @@ def build_triton_repo(repo, engine, model, model_name):
         "${tokenizer_type}": arch,
         "${triton_max_batch_size}": max_batch_size
         })
-    replace(to('tensorrt_llm/config.pbtxt'), {
+    trtllm_dict = {
         '${decoupled_mode}': 'True',
         "${batching_strategy}": 'inflight_fused_batching',
         "${engine_dir}": engine,
         "${exclude_input_in_output}": "True",
         "${triton_max_batch_size}": max_batch_size,
         "${max_queue_delay_microseconds}": 50000,
-        })
+        }
+    if args.gpu_mem_fraction:
+        assert args.gpu_mem_fraction > 0 and args.gpu_mem_fraction < 1.0
+        trtllm_dict['${kv_cache_free_gpu_mem_fraction}'] = args.gpu_mem_fraction
+    replace(to('tensorrt_llm/config.pbtxt'), trtllm_dict)
     append_pbtxt(to('tensorrt_llm/config.pbtxt'), {
         "model_name": model_name,
         "max_input_len": param["builder_config"]["max_input_len"],
@@ -125,7 +130,7 @@ def build_triton_repo(repo, engine, model, model_name):
     })
         
     replace(to('ensemble/config.pbtxt'), {
-        "${triton_max_batch_size}": 16
+        "${triton_max_batch_size}": max_batch_size
         })
     return path
 
