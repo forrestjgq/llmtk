@@ -4,12 +4,24 @@ import json
 import os
 import sys
 from typing import Dict, Optional
+from numpy import real
 
 import torch
 
+from pathlib import Path
+
+def is_llama(model_type):
+    return model_type in ["llama", "mistral"]
+def is_baichuan(model_type):
+    return model_type == 'baichuan'
+def is_falcon(model_type):
+    return model_type == 'falcon'
+def is_chatglm(model_type):
+    return model_type == 'chatglm'
+
 @dataclass
 class Config:
-    model: str = None
+    model_name: str = None
     qt: str = None
     batch: int = 0
     input: int = 0
@@ -24,8 +36,11 @@ class Config:
     direct_save: bool = False
 
     def __post_init__(self):
-        self.model_type = self._get_model_type()
-    
+        with open(os.path.join(self.src, 'config.json'), 'r') as fp:
+            js = json.load(fp)
+            self.model_type = js['model_type'].lower()
+            attention_heads = js['num_attention_heads']
+            assert attention_heads % self.tp == 0, f'num attention heads {attention_heads} does not support tensor parallel {self.tp}'
             
     def _get_model_type(self):
         with open(os.path.join(self.src, 'config.json'), 'r') as fp:
@@ -37,7 +52,7 @@ class Config:
     def dst_path(self):
         if self.direct_save:
             return self.dst
-        segs = [self.model, self.prefix, self.batch, self.input, self.output, self.tp, self.pp]
+        segs = [self.model_name, self.prefix, self.batch, self.input, self.output, self.tp, self.pp]
         segs = [str(p) for p in segs if p is not None]
         return os.path.join(self.dst, '_'.join(segs))
 
@@ -67,26 +82,53 @@ class Options:
     def _path(self, file):
         return os.path.join(self.trtllm, file)
 
-    def generate(self, file):
+    def generate(self, file, disabled=None):
         py = self._path(file)
         s = []
         for k, v in self.d.items():
-            s.append(k)
-            if v is not None:
-                s.append(str(v))
+            if disabled is None or k not in disabled:
+                s.append(k)
+                if v is not None:
+                    s.append(str(v))
         prefix = ''
         if self.devices and len(self.devices) > 0:
             prefix = f"CUDA_VISIBLE_DEVICES={self.devices} "
         return prefix + f"python -u {py} " + " ".join(s)
 
 class Exec:
-    def __init__(self, trtllm, devices) -> None:
+    def __init__(self, trtllm, devices, model_type) -> None:
         self.trtllm = trtllm
-        self.hf_cvt_file = "examples/llama/hf_llama_convert.py"
-        self.quant_file = "examples/llama/quantize.py"
-        self.build_file = "examples/llama/build.py"
+        self.model_type = model_type
         self.extra_options = {}
+        self.disabled_options = set()
+        if is_llama(self.model_type):
+            self.hf_cvt_file = "examples/llama/hf_llama_convert.py"
+            self.quant_file = "examples/llama/quantize.py"
+            self.build_file = "examples/llama/build.py"
+        elif is_baichuan(self.model_type):
+            self.hf_cvt_file = "examples/baichuan/hf_baichuan_convert.py"
+            self.quant_file = None
+            self.build_file = "examples/baichuan/build.py"
+        elif is_chatglm(self.model_type):
+            self.hf_cvt_file = None
+            self.quant_file = "examples/chatglm/quantize.py"
+            self.build_file = "examples/chatglm/build.py"
+        elif is_falcon(self.model_type):
+            self.hf_cvt_file = None
+            self.quant_file = "examples/falcon/quantize.py"
+            self.build_file = "examples/falcon/build.py"
+        else:
+            raise Exception('no impl found for model type ' + self.model_type)
+            
         self.devices = devices
+
+    def remove_option(self, *keys):
+        for key in keys:
+            if len(key) == 1:
+                key = '-' + key
+            else:
+                key = '--' + key
+            self.disabled_options.add(key)
 
     def add_option(self, key: str, value: any):
         self.extra_options[key] = value
@@ -216,8 +258,8 @@ class Exec:
         return self._build(opt, cfg), awq
         
         
-    def _build(self, opt, cfg):
-        ret = self._run_cmd(opt.generate(self.build_file))
+    def _build(self, opt: Options, cfg):
+        ret = self._run_cmd(opt.generate(self.build_file, disabled=self.disabled_options))
         if ret == 0:
             return cfg.dst_path()
         return None
@@ -227,7 +269,9 @@ class Exec:
         opt.add("use_gpt_attention_plugin", "float16")
         opt.add("use_gemm_plugin", "float16")
         opt.add("enable_context_fmha", None)
-        # opt.add("use_parallel_embedding") # failed while loading embedding weight if tp > 1
+        # failed while loading embedding weight if tp > 1
+        # and baichuan does not support
+        # opt.add("use_parallel_embedding") 
         opt.add("use_inflight_batching")
         opt.add("paged_kv_cache")
     @staticmethod
@@ -259,8 +303,90 @@ class Exec:
         else:
             print("engine build failed")
         
+def _get_chatglm_model_name(cfg: Config):
+    model_name = cfg.model_name
+    if model_name is None or len(cfg.model_name) == 0:
+        model_name = Path(cfg.src).parts[-1]
+    segs = set(model_name.replace('_', '-').lower().split('-'))
+    p1 = {'chatglm3','chatglm2', 'chatglm', 'glm'}
+    sec = list(p1.intersection(segs))
+    assert len(sec) == 1, 'unknown chatglm model ' + model_name
+    segs.remove(sec[0])
+    realname = sec[0]
+
+    p1 = {'6b', '10b'}
+    sec = list(p1.intersection(segs))
+    assert len(sec) == 1, 'unknown chatglm model ' + model_name
+    realname = realname + '_' + sec[0]
+    segs.remove(sec[0])
+
+    p1 = {'32k', 'base'}
+    sec = list(p1.intersection(segs))
+    if len(sec) == 1:
+        realname = realname + '_' + sec[0]
+
+    names = [ "chatglm_6b", "chatglm2_6b", "chatglm2_6b_32k", "chatglm3_6b",
+            "chatglm3_6b_base", "chatglm3_6b_32k", "glm_10b" ]
+    assert realname in names, f'unknown predicted model name {realname}'
+    return realname
+
+def build_falcon(cfg: Config, exec: Exec, tmpdir: str = None):
+    qt = cfg.qt
+    if qt is None:
+        cfg.prefix = "fp16"
+        output_path, tmp_path = exec.make_fp16(cfg)
+    else:
+        raise Exception("not impl")
+        if qt == "sq":
+            cfg.prefix = "sq0.8"
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=0.8)
+        elif qt == "int8kv":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_w8kv8(tmpdir, cfg)
+        elif qt == "fp8":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_fp8(tmpdir, cfg)
+        elif qt == "awq":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            cvtdst = os.path.join(tmpdir, "llama-7b-4bit-gs128-awq.pt")  # todo
+            output_path, tmp_path = exec.make_awq(cvtdst, cfg)
+    return output_path, tmp_path
+
+def build_chatglm(cfg: Config, exec: Exec, tmpdir: str = None):
+    assert cfg.pp == 1, 'chatglm does not support pipeline parallel'
+    model_name = _get_chatglm_model_name(cfg)
+    exec.add_option("model_name", model_name)
+
+    qt = cfg.qt
+    if qt is None:
+        cfg.prefix = "fp16"
+        output_path, tmp_path = exec.make_fp16(cfg)
+    else:
+        raise Exception("not impl")
+        if qt == "sq":
+            cfg.prefix = "sq0.8"
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=0.8)
+        elif qt == "int8kv":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_w8kv8(tmpdir, cfg)
+        elif qt == "fp8":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_fp8(tmpdir, cfg)
+        elif qt == "awq":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            cvtdst = os.path.join(tmpdir, "llama-7b-4bit-gs128-awq.pt")  # todo
+            output_path, tmp_path = exec.make_awq(cvtdst, cfg)
+    return output_path, tmp_path
+
 def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
-    name = cfg.model
     if cfg.model_type == 'mistral':
         # load config.json in model src dir and get max_position_embeddings to
         # set option max_input_len
@@ -273,6 +399,53 @@ def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
         cfg.prefix = "fp16"
         output_path, tmp_path = exec.make_fp16(cfg)
     else:
+        if qt == "sq":
+            cfg.prefix = "sq0.8"
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=0.8)
+        elif qt == "int8kv":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_w8kv8(tmpdir, cfg)
+        elif qt == "fp8":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            output_path, tmp_path = exec.make_fp8(tmpdir, cfg)
+        elif qt == "awq":
+            cfg.prefix = qt
+            assert tmpdir is not None
+            cvtdst = os.path.join(tmpdir, "llama-7b-4bit-gs128-awq.pt")  # todo
+            output_path, tmp_path = exec.make_awq(cvtdst, cfg)
+    return output_path, tmp_path
+
+def build_baichuan(cfg: Config, exec: Exec, tmpdir: str = None):
+    assert cfg.pp == 1, 'baichuan does not support pipeline parallel'
+    model_name = cfg.model_name
+    if model_name is None or len(model_name) == 0:
+        model_name = Path(cfg.src).parts[-1] # try to get from file path
+    segs = model_name.lower().split('-')
+    if 'baichuan2' in segs:
+        ver = 'v2'
+    elif 'baichuan' in segs:
+        ver = 'v1'
+    else:
+        raise Exception(f"unknown model name {model_name}, we accept name like Baichuan2-7B-Chat")
+    if '7b' in segs:
+        ver = ver + '_7b'
+    elif '13b' in segs:
+        ver = ver + '_13b'
+    else:
+        raise Exception(f"unknown model name {model_name}, we accept name like Baichuan2-7B-Chat")
+    exec.add_option("model_version", ver)
+    exec.remove_option("tp_size", "pp_size")
+
+    qt = cfg.qt
+    if qt is None:
+        cfg.prefix = "fp16"
+        output_path, tmp_path = exec.make_fp16(cfg)
+    else:
+        # todo
+        raise Exception("not impl")
         if qt == "sq":
             cfg.prefix = "sq0.8"
             assert tmpdir is not None
@@ -314,12 +487,22 @@ def build(trtllm: str = None,
     batch, input, output = v[0], v[1], v[2]
     v = [int(s) for s in parallel.split(":")]
     tp, pp = v[0], v[1]
-    cfg = Config(model=name, qt=qt, batch=batch, input=input, output=output, tp=tp, pp=pp, src=src, dst=dst, direct_save=direct_save)
-    exec = Exec(trtllm, devices)
+    cfg = Config(model_name=name, qt=qt, batch=batch, input=input, output=output, tp=tp, pp=pp, src=src, dst=dst, direct_save=direct_save)
     model_type = cfg.model_type
-    if model_type == 'llama' or model_type == 'mistral':
-        output_path, tmp_path = build_llama(cfg, exec, tmpdir)
-    else:
+    exec = Exec(trtllm, devices, model_type)
+    builders = [
+        [is_llama, build_llama],
+        [is_baichuan, build_baichuan],
+        [is_chatglm, build_chatglm],
+        [is_falcon, build_falcon],
+    ]
+    found = False
+    for b in builders:
+        if b[0](model_type):
+            output_path, tmp_path = b[1](cfg, exec, tmpdir)
+            found = True
+            break
+    if not found:
         raise Exception("unknown model type " + model_type)
     assert output_path is not None
     assert os.path.exists(output_path)
@@ -332,7 +515,9 @@ def add_arguments(parser: argparse.ArgumentParser, excepts=[]):
     if 'trtllm' not in excepts:
         parser.add_argument('--trtllm', type=str, default=None, help="TensorRT-LLM path")
     if 'name' not in excepts:
-        parser.add_argument('--name', type=str, required=False, help="model name, used to name the engine directory")
+        # Baichuan require model version, which coming from model official name, to determine
+        # how to build the engine, in which case if 
+        parser.add_argument('--name', type=str, required=False, help="model official name, used to name the engine directory if direct-save is not set, and for some models used for building")
     if 'bio' not in excepts:
         parser.add_argument('--bio', type=str, required=False, help="<batch>:<input len>:<output len>")
     if 'parallel' not in excepts:
