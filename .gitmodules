@@ -6,3 +6,6 @@
 	path = trtllm
 	url = git@github.com:forrestjgq/trtllm.git
 	branch = main
+[submodule "oaip"]
+	path = oaip
+	url = git@gitlab.deepglint.com:guoqingjiang/oaip.git

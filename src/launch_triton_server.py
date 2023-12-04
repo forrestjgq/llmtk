@@ -2,6 +2,7 @@ import argparse
 import base64
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,18 +16,20 @@ def parse_arguments():
     parser = argparse.ArgumentParser()
     # docker will build a default one inside
     parser.add_argument('--gpu-mem-fraction', type=float, default=None, help='how much GPU memory should be used, value range 0~1')
+    parser.add_argument('--oaip', default='/app/oaip', required=False, help='path to oaip, default: /app/oaip')
     parser.add_argument('--disable-proxy', default=False, action='store_true', help='should proxy be disabled')
     parser.add_argument('--http-port', type=int, default=8000, help='triton server/proxy http port')
     parser.add_argument('--repo', type=str, default='/app/all_models/inflight_batcher_llm', help='path to backend/all_models/inflight_batcher_llm')
     # by default, user should mount the engine to /engine and run
     parser.add_argument('--engine', type=str, default='/engine', help='path to tensorrt-llm engine to run')
     parser.add_argument('--model', type=str, default='/model', help='path to model containing tokenizer and config.json')
-    parser.add_argument('--model-name', type=str, default=None, required=True, help='model name for proxy to apply chat template, like llama-2-7b, llama-2-7b-chat-hf, mistral, zephyr,...')
+    parser.add_argument('--model-name', type=str, default=None, required=False, 
+                        help='model name for proxy to apply chat template, like llama-2-7b, llama-2-7b-chat-hf, mistral, zephyr,..., if not present, use directory name of --src instead')
     parser.add_argument('--devices', type=str, default=None, help='specify cuda devices to use, like `0,1,2,3`')
     parser.add_argument('--tritonserver',
                         type=str,
                         default='/opt/tritonserver/bin/tritonserver')
-    add_arguments(parser, excepts=['trtllm', 'src', 'dst', 'direct-save', 'devices'])
+    add_arguments(parser, excepts=['trtllm', 'src', 'dst', 'direct-save', 'devices', 'name'])
     return parser.parse_args()
 
 
@@ -51,15 +54,15 @@ def replace(pbtxt, words: dict):
                     line = line.replace(k, str(v))
             fp.write(line)
 
-def detect_model_type(model):
+def detect_tokenizer_type(model):
     with open(os.path.join(model, 'config.json'), 'r') as fp:
         js = json.load(fp)
         arch = js['model_type'].lower()
-        if arch == 'mistral':
-            arch = 'auto'
-        return arch
-def read_engine_parameters(engine):
-    with open(os.path.join(engine, 'config.json'), 'r') as fp:
+        if arch in ['llama', 't5', 'baichuan', 'chatglm']:
+            return arch
+        return 'auto'
+def read_engine_parameters(engine_cfg):
+    with open(engine_cfg, 'r') as fp:
         return json.load(fp)
 def read_file(*path, flag='rb'):
     with open(os.path.join(*path), flag) as fp:
@@ -80,7 +83,7 @@ parameters: {{
 """
             fp.write(txt)
 
-def build_triton_repo(repo, engine, model, model_name):
+def build_triton_repo(repo, engine, model, model_name, engine_cfg_path):
     """copy repo to /tmp and modify pbtxts"""
     assert len(model_name) > 0
     path = '/tmp/repo'
@@ -89,10 +92,10 @@ def build_triton_repo(repo, engine, model, model_name):
     shutil.copytree(repo, path)
     def to(file):
         return os.path.join(path, file)
-    arch = detect_model_type(model)
-    param = read_engine_parameters(args.engine)
+    arch = detect_tokenizer_type(model)
+    param = read_engine_parameters(engine_cfg_path)
 
-    engine_cfg = read_file(args.engine, 'config.json')
+    engine_cfg = read_file(engine_cfg_path)
     model_cfg = read_file(args.model, 'config.json')
     model_cfg = str(base64.b64encode(model_cfg), encoding="utf8")
     engine_cfg = str(base64.b64encode(engine_cfg), encoding="utf8")
@@ -134,11 +137,11 @@ def build_triton_repo(repo, engine, model, model_name):
         })
     return path
 
-def get_world_size(engine, devices):
-    with open(os.path.join(engine, 'config.json'), 'r') as fp:
+def get_world_size(engine_cfg, devices):
+    with open(engine_cfg, 'r') as fp:
         js = json.load(fp)['builder_config']
-        tp = js['pipeline_parallel']
-        pp = js['tensor_parallel']
+        tp = js.get('pipeline_parallel', 1)
+        pp = js.get('tensor_parallel', 1)
         world = tp * pp
 
         cnt = torch.cuda.device_count()
@@ -149,21 +152,55 @@ def get_world_size(engine, devices):
         
         return world
 
+def get_engine_cfg(engine):
+    path = pathlib.Path(engine)
+    found_engine = False
+    cfg = None
+    for p in path.iterdir():
+        print('suffix ', p.suffix)
+        if p.suffix.lower() == '.engine':
+            found_engine = True
+        if p.parts[-1] == 'config.json':
+            cfg = str(p)
+        if cfg is None and str(p).endswith('config.json'):
+            cfg = str(p)
+    print("foudn engine ", found_engine, " cfg ", cfg)
+    if not found_engine:
+        return None
+    return cfg
+    
 
 if __name__ == '__main__':
     args = parse_arguments()
     args.repo = os.path.realpath(args.repo)
+    if args.model_name is None:
+        args.model_name = Path(args.model).parts[-1]
     args.model_name = args.model_name.lower()
 
-    if not os.path.exists(os.path.join(args.engine, 'config.json')):
+    cfg = get_engine_cfg(args.engine)
+    if cfg is None:
         # engine not present, try building new one
-        build(trtllm='/app/tensorrt_llm', src=args.model, dst=args.engine, direct_save=True, **vars(args))
+        build(trtllm='/app/tensorrt_llm', src=args.model, dst=args.engine, direct_save=True, name=args.model_name, **vars(args))
+        cfg = get_engine_cfg(args.engine)
 
-    model_path = build_triton_repo(args.repo, args.engine, args.model, args.model_name)
-    world = get_world_size(args.engine, args.devices)
+    # check engine configuration
+    assert cfg is not None, 'engine config not found'
+    filepath = Path(cfg)
+    assert filepath.exists(), f'engine config {filepath} not found'
+    if filepath.parts[-1] != 'config.json':
+        # trtllm sucks on chatglm model building because they write chatglmxxx-config.json
+        # instead of config.json, which can not be recognized by backend
+        if args.model_name.startswith('chatglm'):
+            shutil.copyfile(filepath, filepath.parent/'config.json')
+        else:
+            raise Exception('lack of impl')
+
+    model_path = build_triton_repo(args.repo, args.engine, args.model, args.model_name, cfg)
+    world = get_world_size(cfg, args.devices)
     triton_port = args.http_port
     if not args.disable_proxy:
         triton_port = 8001
-        subprocess.call(f'/app/oaip -triton 127.0.0.1:{triton_port} -minloglevel 0 -logtostderr -port {args.http_port} &', shell=True)
+        assert os.path.exists(args.oaip), f'oaip not found: {args.oaip}'
+        subprocess.call(f'{args.oaip} -triton 127.0.0.1:{triton_port} -minloglevel 0 -logtostderr -port {args.http_port} &', shell=True)
     cmd = get_cmd(world, args.tritonserver, model_path, triton_port, args.devices)
     subprocess.call(cmd, shell=True)
