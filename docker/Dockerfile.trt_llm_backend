@@ -49,6 +49,8 @@ FROM dev as trt_llm_builder
 WORKDIR /app
 COPY backend/scripts scripts
 COPY backend/all_models all_models
+COPY dgtrt dgtrt
+RUN cd /app/dgtrt && mkdir -p /app/dgtrt/build && cd /app/dgtrt/build && cmake .. && make install-python-package && cd /app && rm -rf dgtrt
 RUN cd /app/tensorrt_llm && python3 scripts/build_wheel.py --trt_root="${TRT_ROOT}" -i -c && cd ..
 
 FROM trt_llm_builder as trt_llm_backend_builder

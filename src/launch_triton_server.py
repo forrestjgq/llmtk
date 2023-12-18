@@ -19,7 +19,7 @@ def parse_arguments():
     parser.add_argument('--oaip', default='/app/oaip', required=False, help='path to oaip, default: /app/oaip')
     parser.add_argument('--disable-proxy', default=False, action='store_true', help='should proxy be disabled')
     parser.add_argument('--http-port', type=int, default=8000, help='triton server/proxy http port')
-    parser.add_argument('--repo', type=str, default='/app/all_models/inflight_batcher_llm', help='path to backend/all_models/inflight_batcher_llm')
+    parser.add_argument('--repo', type=str, default=None, help='path to backend ensemble pipeline definition')
     # by default, user should mount the engine to /engine and run
     parser.add_argument('--engine', type=str, default='/engine', help='path to tensorrt-llm engine to run')
     parser.add_argument('--model', type=str, default='/model', help='path to model containing tokenizer and config.json')
@@ -29,6 +29,7 @@ def parse_arguments():
     parser.add_argument('--tritonserver',
                         type=str,
                         default='/opt/tritonserver/bin/tritonserver')
+    parser.add_argument('--trtllm', type=str, default='/app/tensorrt_llm', help='specify trtllm directory')
     add_arguments(parser, excepts=['trtllm', 'src', 'dst', 'direct-save', 'devices', 'name'])
     return parser.parse_args()
 
@@ -154,6 +155,10 @@ def get_world_size(engine_cfg, devices):
 
 def get_engine_cfg(engine):
     path = pathlib.Path(engine)
+    if not path.exists():
+        return None
+    if not path.is_dir():
+        raise IsADirectoryError
     found_engine = False
     cfg = None
     for p in path.iterdir():
@@ -180,7 +185,7 @@ if __name__ == '__main__':
     cfg = get_engine_cfg(args.engine)
     if cfg is None:
         # engine not present, try building new one
-        build(trtllm='/app/tensorrt_llm', src=args.model, dst=args.engine, direct_save=True, name=args.model_name, **vars(args))
+        build(src=args.model, dst=args.engine, direct_save=True, name=args.model_name, **vars(args))
         cfg = get_engine_cfg(args.engine)
 
     # check engine configuration
@@ -195,6 +200,11 @@ if __name__ == '__main__':
         else:
             raise Exception('lack of impl')
 
+    if args.repo is None:
+        if 'llava' in args.model_name:
+            args.repo = '/app/all_models/llava'
+        else:
+            args.repo = '/app/all_models/inflight_batcher_llm'
     model_path = build_triton_repo(args.repo, args.engine, args.model, args.model_name, cfg)
     world = get_world_size(cfg, args.devices)
     triton_port = args.http_port
