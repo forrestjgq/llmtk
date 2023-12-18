@@ -11,7 +11,7 @@ import torch
 from pathlib import Path
 
 def is_llama(model_type):
-    return model_type in ["llama", "mistral"]
+    return model_type in ["llama", "mistral", "llava"]
 def is_baichuan(model_type):
     return model_type == 'baichuan'
 def is_falcon(model_type):
@@ -394,6 +394,8 @@ def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
         with open(os.path.join(cfg.src, 'config.json'),'r') as fp:
             js = json.load(fp)
             exec.add_option("max_input_len", js['max_position_embeddings'])
+    elif cfg.model_type == 'llava':
+        exec.add_option("use_lookup_plugin", None)
     qt = cfg.qt
     if qt is None:
         cfg.prefix = "fp16"
@@ -489,6 +491,11 @@ def build(trtllm: str = None,
     tp, pp = v[0], v[1]
     cfg = Config(model_name=name, qt=qt, batch=batch, input=input, output=output, tp=tp, pp=pp, src=src, dst=dst, direct_save=direct_save)
     model_type = cfg.model_type
+
+    pdst = Path(dst)
+    if not pdst.exists():
+        pdst.mkdir(parents=True, exist_ok=True)
+
     exec = Exec(trtllm, devices, model_type)
     builders = [
         [is_llama, build_llama],

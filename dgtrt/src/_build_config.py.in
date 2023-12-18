@@ -1,0 +1,7 @@
+_build_config = {
+    "VEGA_VERSION" : "@VEGA_VERSION@",
+    "VEGA_BASE_INFER" : "@VEGA_BASE_INFER@",
+    "VEGA_ARCH" : "@VEGA_ARCH@",
+    "VEGA_TARGET" : "@VEGA_TARGET@",
+    "BUILD_TYPE" : "@VEGA_BUILD_TYPE@"
+}
