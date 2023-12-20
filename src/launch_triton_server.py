@@ -289,7 +289,7 @@ if __name__ == "__main__":
     world = get_world_size(cfg, args.devices)
     triton_port = args.http_port
     if not args.disable_proxy:
-        triton_port = 8001
+        triton_port += 1 # triton port is oaip port + 1
         assert os.path.exists(args.oaip), f"oaip not found: {args.oaip}"
         oaip = f"{args.oaip} -triton 127.0.0.1:{triton_port} -http-log-level 10 -minloglevel 1 -logtostderr -port {args.http_port} &"
         print(">>> ", oaip)
