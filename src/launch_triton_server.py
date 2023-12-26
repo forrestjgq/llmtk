@@ -29,6 +29,12 @@ def parse_arguments():
         help="path to oaip, default: /app/oaip",
     )
     parser.add_argument(
+        "--schema",
+        default=None,
+        required=False,
+        help="image processing schema, input_feature/vision_tower/None",
+    )
+    parser.add_argument(
         "--disable-proxy",
         default=False,
         action="store_true",
@@ -142,9 +148,13 @@ parameters: {{
 """
             fp.write(txt)
 
+def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
+    """copy repo to /tmp and modify pbtxts
 
-def build_triton_repo(repo, engine, model, model_name, engine_cfg_path):
-    """copy repo to /tmp and modify pbtxts"""
+    schema: visin_tower(default): use torch vision tower, recv image and cpu
+                                  decode it and use torch vision tower for feature generating
+            input_feature:        oaip generates feature, save to file, give image as feature path
+    """
     assert len(model_name) > 0
     path = "/tmp/repo"
     if os.path.exists(path):
@@ -159,18 +169,44 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path):
 
     engine_cfg = read_file(engine_cfg_path)
     model_cfg = read_file(args.model, "config.json")
+    model_js = json.loads(model_cfg)
+    hidden = model_js["hidden_size"]
     model_cfg = str(base64.b64encode(model_cfg), encoding="utf8")
     engine_cfg = str(base64.b64encode(engine_cfg), encoding="utf8")
-
     max_batch_size = param["builder_config"]["max_batch_size"]
+
+    if 'llava' in model_name.lower():
+        if schema is None:
+            schema = "vision_tower"
+        if schema == "vision_tower":
+            inst_cnt = 2
+            inst_type = 'KIND_GPU'
+        elif schema == "input_feature":
+            inst_cnt = 8
+            inst_type = 'KIND_CPU'
+        else:
+            raise Exception(f"unknown schema {schema} for llava")
+    else:
+        if schema is None:
+            schema = "default"
+        inst_cnt = 1
+        inst_type = 'KIND_CPU'
+       
+        
     replace(
         to("preprocessing/config.pbtxt"),
         {
             "${tokenizer_dir}": model,
             "${tokenizer_type}": arch,
             "${triton_max_batch_size}": max_batch_size,
+            "${instance_count}": inst_cnt,
+            "${instance_type}": inst_type,
         },
     )
+    append_pbtxt(to("preprocessing/config.pbtxt"), {
+        "hidden_size": str(hidden),
+        "schema": schema,
+    })
     replace(
         to("postprocessing/config.pbtxt"),
         {
@@ -284,14 +320,14 @@ if __name__ == "__main__":
         else:
             args.repo = "/app/all_models/inflight_batcher_llm"
     model_path = build_triton_repo(
-        args.repo, args.engine, args.model, args.model_name, cfg
+        args.repo, args.engine, args.model, args.model_name, cfg, args.schema
     )
     world = get_world_size(cfg, args.devices)
     triton_port = args.http_port
     if not args.disable_proxy:
         triton_port += 1 # triton port is oaip port + 1
         assert os.path.exists(args.oaip), f"oaip not found: {args.oaip}"
-        oaip = f"{args.oaip} -triton 127.0.0.1:{triton_port} -http-log-level 10 -minloglevel 1 -logtostderr -port {args.http_port} &"
+        oaip = f"{args.oaip} -triton 127.0.0.1:{triton_port} -http-log-level 10 -minloglevel 1 -logtostderr -port {args.http_port} -tmpdir /data/jgq/tmpfs/b64 &"
         print(">>> ", oaip)
         subprocess.call(oaip, shell=True)
     cmd = get_cmd(world, args.tritonserver, model_path, triton_port, args.devices)
