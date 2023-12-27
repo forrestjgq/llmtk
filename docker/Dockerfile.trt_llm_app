@@ -17,4 +17,5 @@ COPY script llmtk_script
 COPY src llmtk_src
 COPY backend/all_models all_models
 COPY bin/oaip oaip
+RUN pip install grequests
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/dgtrt:${LD_LIBRARY_PATH}
