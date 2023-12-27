@@ -4,8 +4,8 @@ set -ex
 # script to build triton+trtllm+trtllm-backend+llmtk docker container
 root=$(dirname $(dirname $(realpath $0)))
 url=dockerhub.deepglint.com/lse/triton_trt_llm
-base=base-0.1
-tag=app-0.3
+base=dev-base-0.1
+tag=app-0.4
 
 pushd $root
 
