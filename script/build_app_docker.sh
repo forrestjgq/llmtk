@@ -9,11 +9,17 @@ tag=dev-app-0.4
 
 pushd $root
 
+rm -rf tmp && mkdir tmp
+
 # build oaip, it's ok to build on host and copy to image
-rm -rf bin && mkdir bin
 pushd oaip/cmd/oaip
-go build -o $root/bin/oaip .
+go build -o $root/tmp/oaip .
 popd
+
+cp -r $root/script .
+cp -r $root/src .
+cp -r $root/backend/all_models .
+cp $root/requirements.txt .
 
 llmtk_commitid=$(git rev-parse HEAD)
 pushd trtllm
