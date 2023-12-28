@@ -285,7 +285,8 @@ def get_engine_cfg(engine):
 
 if __name__ == "__main__":
     args = parse_arguments()
-    args.repo = os.path.realpath(args.repo)
+    if args.repo is not None:
+        args.repo = os.path.realpath(args.repo)
     if args.model_name is None:
         args.model_name = Path(args.model).parts[-1]
     args.model_name = args.model_name.lower()
