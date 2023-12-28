@@ -3,9 +3,9 @@
 set -ex
 
 root=$(dirname $(dirname $(realpath $0)))
-url=$(jq .repo $root/docker/version.json)
-tag=$(jq .triton $root/docker/version.json)
-base=$(jq .base $root/docker/version.json)
+url=$(jq -r .repo $root/docker/version.json)
+tag=$(jq -r .triton $root/docker/version.json)
+base=$(jq -r .base $root/docker/version.json)
 
 pushd $root
 

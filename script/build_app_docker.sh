@@ -3,9 +3,9 @@ set -ex
 
 # script to build triton+trtllm+trtllm-backend+llmtk docker container
 root=$(dirname $(dirname $(realpath $0)))
-url=$(jq .repo $root/docker/version.json)
-tag=$(jq .app $root/docker/version.json)
-base=$(jq .triton $root/docker/version.json)
+url=$(jq -r .repo $root/docker/version.json)
+tag=$(jq -r .app $root/docker/version.json)
+base=$(jq -r .triton $root/docker/version.json)
 
 pushd $root
 
