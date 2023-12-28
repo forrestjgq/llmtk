@@ -9,18 +9,7 @@ base=$(jq -r .triton $root/docker/version.json)
 
 pushd $root
 
-rm -rf tmp && mkdir tmp
-
-# build oaip, it's ok to build on host and copy to image
-pushd oaip/cmd/oaip
-go build -o $root/tmp/oaip .
-popd
-
-pushd tmp
-cp -r $root/script .
-cp -r $root/src .
-cp -r $root/backend/all_models .
-
+# get commit ids
 llmtk_commitid=$(git rev-parse HEAD)
 pushd trtllm
 trtllm_commitid=$(git rev-parse HEAD)
@@ -32,11 +21,24 @@ pushd oaip
 oaip_commitid=$(git rev-parse HEAD)
 popd
 
+# build oaip, it's ok to build on host and copy to image
+pushd oaip/cmd/oaip
+go build -o $root/tmp/oaip .
+popd
+
+# prepare docker workspace
+rm -rf tmp && mkdir tmp
+pushd tmp
+cp -r $root/script .
+cp -r $root/src .
+cp -r $root/backend/all_models .
+
 extra_args=""
 if [ ! -z $http_proxy ]; then
     extra_args="--build-arg proxy_val=$http_proxy"
 fi
 
+# build
 DOCKER_BUILDKIT=1 docker build \
  --progress=plain \
  -t $url:$tag \
