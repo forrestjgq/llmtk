@@ -3,9 +3,9 @@ set -ex
 
 # script to build triton+trtllm+trtllm-backend+llmtk docker container
 root=$(dirname $(dirname $(realpath $0)))
-url=dockerhub.deepglint.com/lse/triton_trt_llm
-base=llava-base-0.1
-tag=dev-app-0.4
+url=$(jq .repo $root/docker/version.json)
+tag=$(jq .app $root/docker/version.json)
+base=$(jq .triton $root/docker/version.json)
 
 pushd $root
 
@@ -35,6 +35,9 @@ popd
 DOCKER_BUILDKIT=1 docker build \
  --progress=plain \
  -t $url:$tag \
+ $extra_args \
+ --build-arg IMAGE=$url:$tag \
+ --build-arg BASE_IMAGE=$url \
  --build-arg BASE_TAG=$base \
  --build-arg LLMTK_COMMITID=$llmtk_commitid \
  --build-arg TRTLLM_COMMITID=$trtllm_commitid \

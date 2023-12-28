@@ -1,9 +1,11 @@
 #!/bin/bash
+# script to build triton+trtllm+trtllm-backend+dgtrt docker container
 set -ex
-# script to build triton+trtllm+trtllm-backend+llmtk docker container
+
 root=$(dirname $(dirname $(realpath $0)))
-url=dockerhub.deepglint.com/lse/triton_trt_llm
-tag=llava-base-0.1
+url=$(jq .repo $root/docker/version.json)
+tag=$(jq .triton $root/docker/version.json)
+base=$(jq .base $root/docker/version.json)
 
 pushd $root
 
@@ -14,11 +16,18 @@ popd
 pushd backend
 backend_commitid=$(git rev-parse HEAD)
 popd
-proxy=122.97.199.40
+
+extra_args=""
+if [ ! -z $http_proxy ]; then
+    extra_args="--build-arg proxy_val=$http_proxy"
+
 DOCKER_BUILDKIT=1 docker build \
  --progress=plain \
  -t $url:$tag \
- --build-arg proxy_val=http://$proxy:17892 \
+ $extra_args \
+ --build-arg BASE_IMAGE=$url \
+ --build-arg BASE_TAG=$base \
+ --build-arg IMAGE=$url:$tag \
  --build-arg LLMTK_COMMITID=$llmtk_commitid \
  --build-arg TRTLLM_COMMITID=$trtllm_commitid \
  --build-arg BACKEND_COMMITID=$backend_commitid \

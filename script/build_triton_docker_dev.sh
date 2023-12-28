@@ -2,9 +2,8 @@
 set -ex
 # script to build triton+trtllm+trtllm-backend+llmtk docker container
 root=$(dirname $(dirname $(realpath $0)))
-url=dockerhub.deepglint.com/lse/triton_trt_llm
-tag=dev-base-0.1
-proxy=122.97.199.40
+url=$(jq .repo $root/docker/version.json)
+tag=$(jq .base $root/docker/version.json)
 
 pushd $root
 
@@ -29,10 +28,15 @@ mkdir trtllm && cp $root/trtllm/docker/common/*.sh trtllm/
 cp $root/script/install.sh .
 popd
 
+extra_args=""
+if [ ! -z $http_proxy ]; then
+    extra_args="--build-arg proxy_val=$http_proxy"
+
 DOCKER_BUILDKIT=1 docker build \
  --progress=plain \
  -t $url:$tag \
- --build-arg proxy_val=http://$proxy:17892 \
+ $extra_args \
+ --build-arg IMAGE=$url:$tag \
  --build-arg LLMTK_COMMITID=$llmtk_commitid \
  --build-arg TRTLLM_COMMITID=$trtllm_commitid \
  --build-arg BACKEND_COMMITID=$backend_commitid \
