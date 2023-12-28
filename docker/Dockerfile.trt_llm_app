@@ -7,6 +7,10 @@ ARG LLMTK_COMMITID=""
 ARG TRTLLM_COMMITID=""
 ARG BACKEND_COMMITID=""
 ARG OAIP_COMMITID=""
+ARG proxy_val=""
+
+ENV http_proxy=$proxy_val
+ENV https_proxy=$proxy_val
 ENV APP_BASE_IMAGE=${BASE_IMAGE}:${BASE_TAG}
 ENV APP_IMAGE=${IMAGE}
 ENV APP_LLMTK_COMMITID=$LLMTK_COMMITID
@@ -19,3 +23,6 @@ COPY script llmtk_script
 COPY src llmtk_src
 COPY all_models all_models
 COPY oaip oaip
+
+ENV http_proxy=""
+ENV https_proxy=""

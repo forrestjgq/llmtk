@@ -31,6 +31,7 @@ popd
 extra_args=""
 if [ ! -z $http_proxy ]; then
     extra_args="--build-arg proxy_val=$http_proxy"
+fi
 
 DOCKER_BUILDKIT=1 docker build \
  --progress=plain \
