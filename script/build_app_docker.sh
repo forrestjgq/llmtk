@@ -16,6 +16,7 @@ pushd oaip/cmd/oaip
 go build -o $root/tmp/oaip .
 popd
 
+pushd tmp
 cp -r $root/script .
 cp -r $root/src .
 cp -r $root/backend/all_models .
@@ -50,3 +51,5 @@ DOCKER_BUILDKIT=1 docker build \
  --build-arg OAIP_COMMITID=$oaip_commitid \
  -f docker/Dockerfile.trt_llm_app .
 popd
+
+rm -rf $root/tmp
