@@ -41,7 +41,7 @@ DOCKER_BUILDKIT=1 docker build \
  --build-arg LLMTK_COMMITID=$llmtk_commitid \
  --build-arg TRTLLM_COMMITID=$trtllm_commitid \
  --build-arg BACKEND_COMMITID=$backend_commitid \
- -f docker/Dockerfile.trt_llm_backend.env ./tmp
+ -f $root/docker/Dockerfile.trt_llm_backend.env $root/tmp
 rm -rf tmp
 
 popd

@@ -292,7 +292,7 @@ if __name__ == "__main__":
     args.model_name = args.model_name.lower()
 
     cfg = get_engine_cfg(args.engine)
-    if cfg is None:
+    if True or cfg is None:
         # engine not present, try building new one
         build(
             src=args.model,
@@ -302,6 +302,8 @@ if __name__ == "__main__":
             **vars(args),
         )
         cfg = get_engine_cfg(args.engine)
+    args.model = os.path.join(args.engine, 'model')
+    assert os.path.exists(args.model)
 
     # check engine configuration
     assert cfg is not None, "engine config not found"

@@ -1,10 +1,8 @@
 import argparse
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 import os
-import sys
-from typing import Dict, Optional
-from numpy import real
+import shutil
 
 import torch
 
@@ -257,11 +255,41 @@ class Exec:
         opt.add("per_group")
         return self._build(opt, cfg), awq
         
+    def _post_build(self, cfg: Config):
+        src = Path(cfg.src)
+        dst = Path(cfg.dst_path()) / "model"
+        vtdst = dst / "vision_tower"
+        dst.mkdir(exist_ok=True)
+        for f in src.iterdir():
+            if not f.is_file():
+                continue
+            name = f.name.lower()
+            if name.endswith('json') or 'token' in name:
+                shutil.copy(f, dst)
+        if self.model_type == 'llava':
+            vt = src / 'vision_tower'
+            assert vt.exists()
+            shutil.copytree(vt, vtdst)
+            with open(src/"pytorch_model.bin.index.json", 'r') as fp:
+                js = json.load(fp)
+                wmap = js["weight_map"]
+                bins = {v for k, v in wmap.items() if k.startswith("model.mm_projector")}
+                assert len(bins) == 1
+                w = torch.load(src/ bins.pop())
+                prefix = 'model.mm_projector.'
+                w = {k[len(prefix):]: v for k, v in w.items() if k.startswith(prefix)}
+                for k in w.keys():
+                    print('\t', k)
+                torch.save(w, dst/'mm_projector.bin')
+        return cfg.dst_path()
+                
         
     def _build(self, opt: Options, cfg):
+        return self._post_build(cfg)
+        
         ret = self._run_cmd(opt.generate(self.build_file, disabled=self.disabled_options))
         if ret == 0:
-            return cfg.dst_path()
+            return self._post_build(cfg)
         return None
     @staticmethod
     def _make_common_options(opt: Options):

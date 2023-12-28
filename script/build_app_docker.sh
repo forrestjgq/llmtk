@@ -21,13 +21,15 @@ pushd oaip
 oaip_commitid=$(git rev-parse HEAD)
 popd
 
+# prepare docker workspace
+rm -rf tmp && mkdir tmp
+
 # build oaip, it's ok to build on host and copy to image
 pushd oaip/cmd/oaip
 go build -o $root/tmp/oaip .
 popd
 
-# prepare docker workspace
-rm -rf tmp && mkdir tmp
+# copy files to workspace
 pushd tmp
 cp -r $root/script .
 cp -r $root/src .
@@ -50,7 +52,7 @@ DOCKER_BUILDKIT=1 docker build \
  --build-arg TRTLLM_COMMITID=$trtllm_commitid \
  --build-arg BACKEND_COMMITID=$backend_commitid \
  --build-arg OAIP_COMMITID=$oaip_commitid \
- -f docker/Dockerfile.trt_llm_app .
+ -f $root/docker/Dockerfile.trt_llm_app .
 popd
 
 rm -rf $root/tmp
