@@ -20,7 +20,6 @@ pushd tmp
 cp -r $root/script .
 cp -r $root/src .
 cp -r $root/backend/all_models .
-cp $root/requirements.txt .
 
 llmtk_commitid=$(git rev-parse HEAD)
 pushd trtllm
