@@ -270,7 +270,6 @@ def get_engine_cfg(engine):
     found_engine = False
     cfg = None
     for p in path.iterdir():
-        print("suffix ", p.suffix)
         if p.suffix.lower() == ".engine":
             found_engine = True
         if p.parts[-1] == "config.json":
@@ -292,7 +291,7 @@ if __name__ == "__main__":
     args.model_name = args.model_name.lower()
 
     cfg = get_engine_cfg(args.engine)
-    if True or cfg is None:
+    if cfg is None:
         # engine not present, try building new one
         build(
             src=args.model,
@@ -302,11 +301,12 @@ if __name__ == "__main__":
             **vars(args),
         )
         cfg = get_engine_cfg(args.engine)
-    args.model = os.path.join(args.engine, 'model')
-    assert os.path.exists(args.model)
 
     # check engine configuration
     assert cfg is not None, "engine config not found"
+    args.model = os.path.join(args.engine, 'model')
+    assert os.path.exists(args.model)
+
     filepath = Path(cfg)
     assert filepath.exists(), f"engine config {filepath} not found"
     if filepath.parts[-1] != "config.json":
