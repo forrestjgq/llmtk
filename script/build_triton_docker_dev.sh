@@ -4,6 +4,8 @@ set -ex
 root=$(dirname $(dirname $(realpath $0)))
 url=$(jq -r .repo $root/docker/version.json)
 tag=$(jq -r .base $root/docker/version.json)
+baseimage=nvcr.io/nvidia/tritonserver
+basetag=23.10-py3
 
 pushd $root
 
@@ -38,6 +40,9 @@ DOCKER_BUILDKIT=1 docker build \
  -t $url:$tag \
  $extra_args \
  --build-arg IMAGE=$url:$tag \
+ --build-arg BASE_IMAGE=$baseimage \
+ --build-arg BASE_TAG=$basetag \
+ --build-arg BASE_URL=$baseimage:$basetag \
  --build-arg LLMTK_COMMITID=$llmtk_commitid \
  --build-arg TRTLLM_COMMITID=$trtllm_commitid \
  --build-arg BACKEND_COMMITID=$backend_commitid \

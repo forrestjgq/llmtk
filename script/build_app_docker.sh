@@ -48,6 +48,7 @@ DOCKER_BUILDKIT=1 docker build \
  --build-arg IMAGE=$url:$tag \
  --build-arg BASE_IMAGE=$url \
  --build-arg BASE_TAG=$base \
+ --build-arg BASE_URL=$url:$base \
  --build-arg LLMTK_COMMITID=$llmtk_commitid \
  --build-arg TRTLLM_COMMITID=$trtllm_commitid \
  --build-arg BACKEND_COMMITID=$backend_commitid \

@@ -2,6 +2,7 @@ import argparse
 import base64
 import json
 import os
+import sys
 import pathlib
 import shutil
 import subprocess
@@ -26,7 +27,7 @@ def parse_arguments():
         "--oaip",
         default="/app/oaip",
         required=False,
-        help="path to oaip, default: /app/oaip",
+        help="path to oaip, default: /app/oaip, set to `none` to disable",
     )
     parser.add_argument(
         "--schema",
@@ -53,21 +54,9 @@ def parse_arguments():
     parser.add_argument(
         "--engine",
         type=str,
-        default="/engine",
-        help="path to tensorrt-llm engine to run",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="/model",
-        help="path to model containing tokenizer and config.json",
-    )
-    parser.add_argument(
-        "--model-name",
-        type=str,
+        required=True,
         default=None,
-        required=False,
-        help="model name for proxy to apply chat template, like llama-2-7b, llama-2-7b-chat-hf, mistral, zephyr,..., if not present, use directory name of --src instead",
+        help="path to tensorrt-llm engine to run",
     )
     parser.add_argument(
         "--devices",
@@ -168,7 +157,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
     param = read_engine_parameters(engine_cfg_path)
 
     engine_cfg = read_file(engine_cfg_path)
-    model_cfg = read_file(args.model, "config.json")
+    model_cfg = read_file(model, "config.json")
     model_js = json.loads(model_cfg)
     hidden = model_js["hidden_size"]
     model_cfg = str(base64.b64encode(model_cfg), encoding="utf8")
@@ -281,56 +270,48 @@ def get_engine_cfg(engine):
         return None
     return cfg
 
+def get_engine_params(engine):
+    assert engine is not None
+    engine = Path(engine)
+    assert engine.exists() and engine.is_dir()
+    param_path = engine / 'build_params.json'
+    assert param_path.exists()
 
+    with open(param_path, 'r') as fp:
+        js = json.load(fp)
+        js['cfg_path'] = os.path.join(engine, 'config.json')
+        return js
 if __name__ == "__main__":
+    print(f">> cmd line: {' '.join(sys.argv)}")
     args = parse_arguments()
+    params = get_engine_params(args.engine)
+    model_name = params['name'].lower()
+    engine_cfg = params['cfg_path']
+
     if args.repo is not None:
         args.repo = os.path.realpath(args.repo)
-    if args.model_name is None:
-        args.model_name = Path(args.model).parts[-1]
-    args.model_name = args.model_name.lower()
-
-    cfg = get_engine_cfg(args.engine)
-    if cfg is None:
-        # engine not present, try building new one
-        build(
-            src=args.model,
-            dst=args.engine,
-            direct_save=True,
-            name=args.model_name,
-            **vars(args),
-        )
-        cfg = get_engine_cfg(args.engine)
 
     # check engine configuration
-    assert cfg is not None, "engine config not found"
-    args.model = os.path.join(args.engine, 'model')
-    assert os.path.exists(args.model)
-
-    filepath = Path(cfg)
-    assert filepath.exists(), f"engine config {filepath} not found"
-    if filepath.parts[-1] != "config.json":
-        # trtllm sucks on chatglm model building because they write chatglmxxx-config.json
-        # instead of config.json, which can not be recognized by backend
-        if args.model_name.startswith("chatglm"):
-            shutil.copyfile(filepath, filepath.parent / "config.json")
-        else:
-            raise Exception("lack of impl")
+    model = os.path.join(args.engine, 'model')
+    assert os.path.exists(model)
 
     if args.repo is None:
-        if "llava" in args.model_name:
+        if "llava" in model_name:
             args.repo = "/app/all_models/llava"
         else:
             args.repo = "/app/all_models/inflight_batcher_llm"
+    else:
+        assert os.path.exists(args.repo), f"repo {args.repo} not exist"
+
     model_path = build_triton_repo(
-        args.repo, args.engine, args.model, args.model_name, cfg, args.schema
+        args.repo, args.engine, model, model_name, engine_cfg, args.schema
     )
-    world = get_world_size(cfg, args.devices)
+    world = get_world_size(engine_cfg, args.devices)
     triton_port = args.http_port
-    if not args.disable_proxy:
+    if args.oaip != 'none':
         triton_port += 1 # triton port is oaip port + 1
         assert os.path.exists(args.oaip), f"oaip not found: {args.oaip}"
-        oaip = f"{args.oaip} -triton 127.0.0.1:{triton_port} -http-log-level 10 -minloglevel 1 -logtostderr -port {args.http_port} -tmpdir /data/jgq/tmpfs/b64 &"
+        oaip = f"{args.oaip} -triton 127.0.0.1:{triton_port} -http-log-level 10 -minloglevel 1 -logtostderr -port {args.http_port} &"
         print(">>> ", oaip)
         subprocess.call(oaip, shell=True)
     cmd = get_cmd(world, args.tritonserver, model_path, triton_port, args.devices)

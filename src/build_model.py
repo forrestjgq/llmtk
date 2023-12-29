@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import json
 import os
 import shutil
+from datetime import datetime
 
 import torch
 
@@ -39,7 +40,6 @@ class Config:
     prefix: str = None
     dtype: str = "float16"
     model_type: str = None
-    direct_save: bool = False
 
     def __post_init__(self):
         with open(os.path.join(self.src, "config.json"), "r") as fp:
@@ -58,19 +58,7 @@ class Config:
         return self.tp * self.pp
 
     def dst_path(self):
-        if self.direct_save:
-            return self.dst
-        segs = [
-            self.model_name,
-            self.prefix,
-            self.batch,
-            self.input,
-            self.output,
-            self.tp,
-            self.pp,
-        ]
-        segs = [str(p) for p in segs if p is not None]
-        return os.path.join(self.dst, "_".join(segs))
+        return self.dst
 
 
 class Options:
@@ -557,7 +545,29 @@ def build_baichuan(cfg: Config, exec: Exec, tmpdir: str = None):
             output_path, tmp_path = exec.make_awq(cvtdst, cfg)
     return output_path, tmp_path
 
+def get_engine_cfg(engine):
+    path = Path(engine)
+    found_engine = False
+    cfg = None
+    for p in path.iterdir():
+        if p.suffix.lower() == ".engine":
+            found_engine = True
+        if p.parts[-1] == "config.json":
+            cfg = str(p)
+        if cfg is None and str(p).endswith("config.json"):
+            cfg = str(p)
+    if not found_engine:
+        return None
+    return cfg
 
+def write_build_params(path, params):
+    app=os.getenv('APP_IMAGE', "")
+    llmtk=os.getenv('APP_LLMTK_COMMITID', '')
+    params['app'] = app
+    params['llmtk'] = llmtk
+    params['date'] = str(datetime.now())
+    with open(path, 'w') as fp:
+        json.dump(params, fp)
 def build(
     trtllm: str = None,
     name: str = None,
@@ -567,7 +577,6 @@ def build(
     dst: str = None,
     qt: str = None,
     tmpdir: str = None,
-    direct_save: bool = False,
     devices: str = None,
     **kwargs,
 ):
@@ -591,7 +600,6 @@ def build(
         pp=pp,
         src=src,
         dst=dst,
-        direct_save=direct_save,
     )
     model_type = cfg.model_type
 
@@ -616,13 +624,36 @@ def build(
         raise Exception("unknown model type " + model_type)
     assert output_path is not None
     assert os.path.exists(output_path)
+    
+    filepath = Path(get_engine_cfg(output_path))
+    assert filepath.exists(), f"engine config {filepath} not found"
+    if filepath.parts[-1] != "config.json":
+        # trtllm sucks on chatglm model building because they write chatglmxxx-config.json
+        # instead of config.json, which can not be recognized by backend
+        if "chatglm" in name.lower():
+            shutil.copyfile(filepath, filepath.parent / "config.json")
+        else:
+            raise Exception("lack of impl")
+
+    params = {
+        "src": src,
+        "dst": dst,
+        "name": name,
+        "tp_size": tp,
+        "pp_size": pp,
+        "batch": batch,
+        "max_input_len": input,
+        "max_output_len": output,
+        "qt": qt,
+    }
+    write_build_params(Path(output_path)/'build_params.json', params)
     return output_path, tmp_path
 
 
 def add_arguments(parser: argparse.ArgumentParser, excepts=[]):
     if "trtllm" not in excepts:
         parser.add_argument(
-            "--trtllm", type=str, default=None, help="TensorRT-LLM path"
+            "--trtllm", type=str, default="/app/tensorrt_llm", help="TensorRT-LLM path"
         )
     if "name" not in excepts:
         # Baichuan require model version, which coming from model official name, to determine
@@ -630,8 +661,8 @@ def add_arguments(parser: argparse.ArgumentParser, excepts=[]):
         parser.add_argument(
             "--name",
             type=str,
-            required=False,
-            help="model official name, used to name the engine directory if direct-save is not set, and for some models used for building",
+            required=True,
+            help="model official name, critial parameter impacting model running",
         )
     if "bio" not in excepts:
         parser.add_argument(
@@ -649,14 +680,12 @@ def add_arguments(parser: argparse.ArgumentParser, excepts=[]):
         parser.add_argument("--src", type=str, required=False, default=None)
     if "dst" not in excepts:
         parser.add_argument("--dst", type=str, required=False, default=None)
-    if "direct-save" not in excepts:
-        parser.add_argument("--direct-save", action="store_true", default=False)
     if "devices" not in excepts:
         parser.add_argument(
             "--devices",
             type=str,
             default=None,
-            help="specify cuda devices to use, like `0,1,2,3`",
+            help="specify cuda devices to use, like `0,1,2,3`, use any device available if not set",
         )
     if "qt" not in excepts:
         parser.add_argument(
