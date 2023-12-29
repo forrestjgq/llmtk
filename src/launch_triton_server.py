@@ -11,7 +11,6 @@ from pathlib import Path
 import torch
 from transformers import AutoTokenizer
 
-from build_model import add_arguments, build
 
 
 def parse_arguments():
@@ -34,12 +33,6 @@ def parse_arguments():
         default=None,
         required=False,
         help="image processing schema, input_feature/vision_tower/None",
-    )
-    parser.add_argument(
-        "--disable-proxy",
-        default=False,
-        action="store_true",
-        help="should proxy be disabled",
     )
     parser.add_argument(
         "--http-port", type=int, default=8000, help="triton server/proxy http port"
@@ -66,15 +59,6 @@ def parse_arguments():
     )
     parser.add_argument(
         "--tritonserver", type=str, default="/opt/tritonserver/bin/tritonserver"
-    )
-    parser.add_argument(
-        "--trtllm",
-        type=str,
-        default="/app/tensorrt_llm",
-        help="specify trtllm directory",
-    )
-    add_arguments(
-        parser, excepts=["trtllm", "src", "dst", "direct-save", "devices", "name"]
     )
     return parser.parse_args()
 
