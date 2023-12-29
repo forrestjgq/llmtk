@@ -233,9 +233,10 @@ class Exec:
     def _cvt_int8_kv(self, dst, cfg: Config):
         kvdst = os.path.join(dst, f"{cfg.tp}-gpu")
         if os.path.exists(kvdst):
-            print(f"quant model exists: {kvdst}")
-            return kvdst
-        opt = self._new_option()
+            shutil.rmtree(kvdst)
+            # print(f"quant model exists: {kvdst}")
+            # return kvdst
+        opt = self._new_option(clean=True)
         cmd = (
             opt.add("i", cfg.src)
             .add("o", dst)
@@ -264,8 +265,9 @@ class Exec:
 
     def _cvt_awq(self, src, dst, calib_size=32):
         if os.path.exists(dst):
-            return dst
-        opt = self._new_option()
+            shutil.rmtree(dst)
+            # return dst
+        opt = self._new_option(clean=True)
         cmd = (
             opt.add("model_dir", src)
             .add("dtype", "float16")
