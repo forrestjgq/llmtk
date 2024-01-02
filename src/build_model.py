@@ -1,4 +1,5 @@
 import argparse
+from ctypes import ArgumentError
 from dataclasses import dataclass
 import json
 import os
@@ -37,7 +38,6 @@ class Config:
     pp: int = 1
     src: str = None
     dst: str = None
-    prefix: str = None
     dtype: str = "float16"
     model_type: str = None
 
@@ -188,8 +188,7 @@ class Exec:
         # assert cfg.pp == 1
         sqdst = os.path.join(dst, f"{cfg.tp}-gpu")
         if os.path.exists(sqdst):
-            # return sqdst
-            shutil.rmtree(sqdst)
+            return sqdst
         opt = self._new_option(clean=True)
         cmd = (
             opt.add("i", cfg.src)
@@ -202,6 +201,9 @@ class Exec:
         ret = self._run_cmd(cmd)
         if ret == 0:
             return sqdst
+        
+        # remove tree to avoid reuse failed
+        shutil.rmtree(sqdst)
         return None
 
     def make_sq(self, cvtdst, cfg: Config, sq=0.8):
@@ -214,8 +216,8 @@ class Exec:
         opt.remove("model_dir")
         opt.add("bin_model_dir", sqdst)
         opt.add("use_smooth_quant")
-        # opt.add("per_token")
-        # opt.add("per_channel")
+        opt.add("per_token")
+        opt.add("per_channel")
         return self._build(opt, cfg), sqdst
 
     def _cvt_int8_kv(self, dst, cfg: Config):
@@ -400,24 +402,19 @@ def _get_chatglm_model_name(cfg: Config):
 def build_falcon(cfg: Config, exec: Exec, tmpdir: str = None):
     qt = cfg.qt
     if qt is None:
-        cfg.prefix = "fp16"
         output_path, tmp_path = exec.make_fp16(cfg)
     else:
         raise Exception("not impl")
         if qt == "sq":
-            cfg.prefix = "sq0.8"
             assert tmpdir is not None
             output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=0.8)
         elif qt == "int8kv":
-            cfg.prefix = qt
             assert tmpdir is not None
             output_path, tmp_path = exec.make_w8kv8(tmpdir, cfg)
         elif qt == "fp8":
-            cfg.prefix = qt
             assert tmpdir is not None
             output_path, tmp_path = exec.make_fp8(tmpdir, cfg)
         elif qt == "awq":
-            cfg.prefix = qt
             assert tmpdir is not None
             cvtdst = os.path.join(tmpdir, "llama-7b-4bit-gs128-awq.pt")  # todo
             output_path, tmp_path = exec.make_awq(cvtdst, cfg)
@@ -431,24 +428,19 @@ def build_chatglm(cfg: Config, exec: Exec, tmpdir: str = None):
 
     qt = cfg.qt
     if qt is None:
-        cfg.prefix = "fp16"
         output_path, tmp_path = exec.make_fp16(cfg)
     else:
         raise Exception("not impl")
         if qt == "sq":
-            cfg.prefix = "sq0.8"
             assert tmpdir is not None
             output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=0.8)
         elif qt == "int8kv":
-            cfg.prefix = qt
             assert tmpdir is not None
             output_path, tmp_path = exec.make_w8kv8(tmpdir, cfg)
         elif qt == "fp8":
-            cfg.prefix = qt
             assert tmpdir is not None
             output_path, tmp_path = exec.make_fp8(tmpdir, cfg)
         elif qt == "awq":
-            cfg.prefix = qt
             assert tmpdir is not None
             cvtdst = os.path.join(tmpdir, "llama-7b-4bit-gs128-awq.pt")  # todo
             output_path, tmp_path = exec.make_awq(cvtdst, cfg)
@@ -471,24 +463,24 @@ def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
             )
     qt = cfg.qt
     if qt is None:
-        cfg.prefix = "fp16"
         output_path, tmp_path = exec.make_fp16(cfg)
     else:
-        if qt == "sq":
-            cfg.prefix = "sq0.8"
-            assert tmpdir is not None
-            output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=0.8)
+        if tmpdir is None:
+            tmpdir = cfg.dst
+        if qt.startswith("sq"):
+            qts = qt.split('=')
+            if len(qts) == 1:
+                param = 0.8
+            elif len(qts) == 2:
+                param = float(qts[1])
+            else:
+                raise ArgumentError(qt)
+            output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=param)
         elif qt == "int8kv":
-            cfg.prefix = qt
-            assert tmpdir is not None
             output_path, tmp_path = exec.make_w8kv8(tmpdir, cfg)
         elif qt == "fp8":
-            cfg.prefix = qt
-            assert tmpdir is not None
             output_path, tmp_path = exec.make_fp8(tmpdir, cfg)
         elif qt == "awq":
-            cfg.prefix = qt
-            assert tmpdir is not None
             cvtdst = os.path.join(tmpdir, "llama-7b-4bit-gs128-awq.pt")  # todo
             output_path, tmp_path = exec.make_awq(cvtdst, cfg)
     return output_path, tmp_path
@@ -521,25 +513,20 @@ def build_baichuan(cfg: Config, exec: Exec, tmpdir: str = None):
 
     qt = cfg.qt
     if qt is None:
-        cfg.prefix = "fp16"
         output_path, tmp_path = exec.make_fp16(cfg)
     else:
         # todo
         raise Exception("not impl")
         if qt == "sq":
-            cfg.prefix = "sq0.8"
             assert tmpdir is not None
             output_path, tmp_path = exec.make_sq(tmpdir, cfg, sq=0.8)
         elif qt == "int8kv":
-            cfg.prefix = qt
             assert tmpdir is not None
             output_path, tmp_path = exec.make_w8kv8(tmpdir, cfg)
         elif qt == "fp8":
-            cfg.prefix = qt
             assert tmpdir is not None
             output_path, tmp_path = exec.make_fp8(tmpdir, cfg)
         elif qt == "awq":
-            cfg.prefix = qt
             assert tmpdir is not None
             cvtdst = os.path.join(tmpdir, "llama-7b-4bit-gs128-awq.pt")  # todo
             output_path, tmp_path = exec.make_awq(cvtdst, cfg)
@@ -689,8 +676,11 @@ def add_arguments(parser: argparse.ArgumentParser, excepts=[]):
         )
     if "qt" not in excepts:
         parser.add_argument(
-            "--qt", type=str, default=None, choices=["sq", "int8kv", "fp8", "awq"]
+            "--qt", type=str, default=None
         )
+        # parser.add_argument(
+        #     "--qt", type=str, default=None, choices=["sq", "int8kv", "fp8", "awq"]
+        # )
     if "tmpdir" not in excepts:
         parser.add_argument("--tmpdir", type=str, default=None)
 

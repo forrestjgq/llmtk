@@ -134,6 +134,11 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
         shutil.rmtree(path)
     shutil.copytree(repo, path)
 
+    # with this model it will fail
+    torm = path + '/tensorrt_llm_bls'
+    if os.path.exists(torm):
+        shutil.rmtree(torm)
+
     def to(file):
         return os.path.join(path, file)
 
@@ -178,6 +183,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
     )
     append_pbtxt(to("preprocessing/config.pbtxt"), {
         "hidden_size": str(hidden),
+        "max_input_len": param["builder_config"]["max_input_len"],
         "schema": schema,
     })
     replace(
@@ -185,6 +191,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
         {
             "${tokenizer_dir}": model,
             "${tokenizer_type}": arch,
+            "${exclude_input_in_output}": "False",
             "${triton_max_batch_size}": max_batch_size,
         },
     )
@@ -192,7 +199,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
         "${decoupled_mode}": "True",
         "${batching_strategy}": "inflight_fused_batching",
         "${engine_dir}": engine,
-        "${exclude_input_in_output}": "True",
+        "${exclude_input_in_output}": "False",
         "${triton_max_batch_size}": max_batch_size,
         "${max_queue_delay_microseconds}": 50000,
     }
