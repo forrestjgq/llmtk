@@ -448,6 +448,7 @@ def build_chatglm(cfg: Config, exec: Exec, tmpdir: str = None):
 
 
 def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
+    exec.add_option("use_lookup_plugin", None)
     if cfg.model_type == "mistral":
         # load config.json in model src dir and get max_position_embeddings to
         # set option max_input_len
@@ -456,7 +457,6 @@ def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
             js = json.load(fp)
             exec.add_option("max_input_len", js["max_position_embeddings"])
     elif cfg.model_type == "llava":
-        exec.add_option("use_lookup_plugin", None)
         if cfg.input < 576:
             raise Exception(
                 "Llava require 576 ids for each image feature, so the input size should large than that"

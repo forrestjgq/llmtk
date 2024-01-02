@@ -17,7 +17,7 @@ def query_gpu_mem(device):
 
 def determine_parallel(path: Path, devices):
     if not isinstance(devices, list):
-        devices = [devices]
+        devices = devices.split(",")
     gpumems = [query_gpu_mem(d) for d in devices]
     tp = 1
     pp = 0
@@ -35,12 +35,26 @@ def determine_parallel(path: Path, devices):
             raise RuntimeError(f"not enough memory for {sz}GB model")
     return tp, pp, devices[: tp * pp]
 
-def run_cmd(cmd):
-    s = ' '.join(cmd)
-    print(f'>>> {s}')
-    os.system(s)
 
-def run_model(model="", engine="", bio="2:2048:512", name=None, devices=None, qt=None, repo=None, oaip=None, **kwargs):
+def run_cmd(cmd):
+    s = " ".join([str(c) for c in cmd])
+    print(f">>> {s}")
+    return os.system(s)
+
+
+def run_model(
+    model="",
+    engine="",
+    bio=None,
+    name=None,
+    devices=None,
+    qt=None,
+    repo=None,
+    oaip=None,
+    **kwargs,
+):
+    model = Path(model)
+    engine = Path(engine)
     if devices is None:
         devices = [str(i) for i in range(torch.cuda.device_count())]
     if name is None:
@@ -50,8 +64,8 @@ def run_model(model="", engine="", bio="2:2048:512", name=None, devices=None, qt
     if engine.exists():
         shutil.rmtree(engine)
     src = Path(__file__).parent
-    launcher = src / "launch_triton_server.py"
-    builder = src / "build_model.py"
+    launcher = str(src / "launch_triton_server.py")
+    builder = str(src / "build_model.py")
     cmd = [
         "python",
         builder,
@@ -63,23 +77,22 @@ def run_model(model="", engine="", bio="2:2048:512", name=None, devices=None, qt
         engine,
         "--devices",
         devices,
-        "--bio",
-        bio,
         "--parallel",
         f"{tp}:{pp}",
     ]
     if qt is not None:
-        cmd.extend("--qt", qt)
+        cmd.extend(["--qt", qt])
+    if bio is not None:
+        cmd.extend(["--bio", bio])
     ret = run_cmd(cmd)
-    assert ret == 0, 'build model failed'
+    assert ret == 0, "build model failed"
     cmd = ["python", launcher, "--engine", engine, "--devices", devices]
     if repo:
-        cmd.extend("--repo", repo)
+        cmd.extend(["--repo", repo])
     if oaip:
-        cmd.extend("--oaip", oaip)
+        cmd.extend(["--oaip", oaip])
     ret = run_cmd(cmd)
-    assert ret == 0, 'run model failed'
-
+    assert ret == 0, "run model failed"
 
 
 def parse_arguments():
@@ -118,7 +131,7 @@ def parse_arguments():
     parser.add_argument(
         "--bio",
         type=str,
-        default=None,
+        default="2:2048:512",
         help="build parameter",
     )
     # by default, user should mount the engine to /engine and run
@@ -144,6 +157,7 @@ def parse_arguments():
     )
     return parser.parse_args()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     args = parse_arguments()
     run_model(**vars(args))
