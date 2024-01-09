@@ -4,6 +4,6 @@
     "base-comment": "setup develepment environment for trtllm/backend/..",
     "triton": "triton-base-0.2",
     "triton-comment": "install trtllm/backend",
-    "app": "dev-app-0.7",
+    "app": "dev-app-0.8",
     "app-comment": "llmtk sources, oaip, ..."
 }
