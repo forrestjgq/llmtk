@@ -111,6 +111,7 @@ class Exec:
         self.model_type = model_type
         self.extra_options = {}
         self.disabled_options = set()
+        self.cmds = []
         if is_llama(self.model_type):
             self.hf_cvt_file = "examples/llama/hf_llama_convert.py"
             self.quant_file = "examples/llama/quantize.py"
@@ -131,6 +132,7 @@ class Exec:
             raise Exception("no impl found for model type " + self.model_type)
 
         self.devices = devices
+        
 
     def remove_option(self, *keys):
         for key in keys:
@@ -287,7 +289,6 @@ class Exec:
     def _post_build(self, cfg: Config):
         src = Path(cfg.src)
         dst = Path(cfg.dst_path()) / "model"
-        vtdst = dst / "vision_tower"
         dst.mkdir(exist_ok=True)
         for f in src.iterdir():
             if not f.is_file():
@@ -298,6 +299,9 @@ class Exec:
         if self.model_type == "llava":
             vt = src / "vision_tower"
             assert vt.exists()
+            vtdst = dst / "vision_tower"
+            if vtdst.exists():
+                shutil.rmtree(vtdst)
             shutil.copytree(vt, vtdst)
             with open(src / "pytorch_model.bin.index.json", "r") as fp:
                 js = json.load(fp)
@@ -346,8 +350,8 @@ class Exec:
         opt.add("tp_size", cfg.tp)
         opt.add("pp_size", cfg.pp)
 
-    @staticmethod
-    def _run_cmd(cmd):
+    def _run_cmd(self, cmd):
+        self.cmds.append(cmd)
         print(f">> {cmd}")
         ret = os.system(cmd)
         if ret != 0:
@@ -565,6 +569,7 @@ def build(
     qt: str = None,
     tmpdir: str = None,
     devices: str = None,
+    keep_intermediate: bool = False,
     **kwargs,
 ):
     assert trtllm is not None
@@ -611,6 +616,7 @@ def build(
         raise Exception("unknown model type " + model_type)
     assert output_path is not None
     assert os.path.exists(output_path)
+
     
     filepath = Path(get_engine_cfg(output_path))
     assert filepath.exists(), f"engine config {filepath} not found"
@@ -632,8 +638,14 @@ def build(
         "max_input_len": input,
         "max_output_len": output,
         "qt": qt,
+        "cmds": exec.cmds
     }
     write_build_params(Path(output_path)/'build_params.json', params)
+
+    if tmp_path is not None:
+        assert output_path != tmp_path
+        if not keep_intermediate:
+            shutil.rmtree(tmp_path)
     return output_path, tmp_path
 
 
@@ -683,6 +695,15 @@ def add_arguments(parser: argparse.ArgumentParser, excepts=[]):
         # )
     if "tmpdir" not in excepts:
         parser.add_argument("--tmpdir", type=str, default=None)
+    if "keep_intermediate" not in excepts:
+        # Baichuan require model version, which coming from model official name, to determine
+        # how to build the engine, in which case if
+        parser.add_argument(
+            "--keep_intermediate",
+            action="store_true",
+            default=False,
+            help="turn this on to keep intermediate files generated for building",
+        )
 
 
 def parse_arguments():

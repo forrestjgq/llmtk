@@ -7,6 +7,8 @@ url=$(jq -r .repo $root/docker/version.json)
 tag=$(jq -r .app $root/docker/version.json)
 base=$(jq -r .triton $root/docker/version.json)
 
+tag="$tag-$(arch)"
+
 pushd $root
 
 # get commit ids
@@ -34,6 +36,7 @@ pushd tmp
 cp -r $root/script .
 cp -r $root/src .
 cp -r $root/backend/all_models .
+cp -r $root/oaip/thirdparty .
 
 extra_args=""
 if [ ! -z $http_proxy ]; then

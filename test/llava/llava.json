@@ -11,17 +11,11 @@
           }
         },
         {
-          "type": "image_url",
-          "image_url": {
-            "url": "https://a.zdmimg.com/202311/24/65606515c70142420.jpg_fo742.jpg"
-          }
-        },
-        {
           "type": "text",
           "text": "What did you see in this image? and how are you feeling?"
         }
       ]
     }
   ],
-  "max_tokens": 4000
+  "max_tokens": 512
 } 

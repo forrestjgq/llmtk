@@ -7,6 +7,7 @@ import pathlib
 import shutil
 import subprocess
 from pathlib import Path
+from colorama import init
 
 import torch
 from transformers import AutoTokenizer
@@ -15,6 +16,14 @@ from transformers import AutoTokenizer
 
 def parse_arguments():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        default=None,
+        required=True,
+        help="Config file",
+    )
     # docker will build a default one inside
     parser.add_argument(
         "--gpu-mem-fraction",
@@ -24,7 +33,7 @@ def parse_arguments():
     )
     parser.add_argument(
         "--oaip",
-        default="/app/oaip",
+        default=None,
         required=False,
         help="path to oaip, default: /app/oaip, set to `none` to disable",
     )
@@ -33,9 +42,6 @@ def parse_arguments():
         default=None,
         required=False,
         help="image processing schema, input_feature/vision_tower/None",
-    )
-    parser.add_argument(
-        "--http-port", type=int, default=8000, help="triton server/proxy http port"
     )
     parser.add_argument(
         "--repo",
@@ -47,7 +53,6 @@ def parse_arguments():
     parser.add_argument(
         "--engine",
         type=str,
-        required=True,
         default=None,
         help="path to tensorrt-llm engine to run",
     )
@@ -58,10 +63,9 @@ def parse_arguments():
         help="specify cuda devices to use, like `0,1,2,3`",
     )
     parser.add_argument(
-        "--tritonserver", type=str, default="/opt/tritonserver/bin/tritonserver"
+        "--tritonserver", type=str, default=None, help="specify triton server app path"
     )
     return parser.parse_args()
-
 
 def get_cmd(world_size, tritonserver, model_repo, http_port, devices):
     cmd = ""
@@ -121,7 +125,7 @@ parameters: {{
 """
             fp.write(txt)
 
-def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
+def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema, gpu_mem_fraction):
     """copy repo to /tmp and modify pbtxts
 
     schema: visin_tower(default): use torch vision tower, recv image and cpu
@@ -154,7 +158,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
     max_batch_size = param["builder_config"]["max_batch_size"]
 
     if 'llava' in model_name.lower():
-        if schema is None:
+        if not schema:
             schema = "vision_tower"
         if schema == "vision_tower":
             inst_cnt = 2
@@ -165,7 +169,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
         else:
             raise Exception(f"unknown schema {schema} for llava")
     else:
-        if schema is None:
+        if not schema:
             schema = "default"
         inst_cnt = 1
         inst_type = 'KIND_CPU'
@@ -203,9 +207,8 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema):
         "${triton_max_batch_size}": max_batch_size,
         "${max_queue_delay_microseconds}": 50000,
     }
-    if args.gpu_mem_fraction:
-        assert args.gpu_mem_fraction > 0 and args.gpu_mem_fraction < 1.0
-        trtllm_dict["${kv_cache_free_gpu_mem_fraction}"] = args.gpu_mem_fraction
+    if gpu_mem_fraction and gpu_mem_fraction > 0 and gpu_mem_fraction < 1.0:
+        trtllm_dict["${kv_cache_free_gpu_mem_fraction}"] = gpu_mem_fraction
     replace(to("tensorrt_llm/config.pbtxt"), trtllm_dict)
     append_pbtxt(
         to("tensorrt_llm/config.pbtxt"),
@@ -272,38 +275,82 @@ def get_engine_params(engine):
         js = json.load(fp)
         js['cfg_path'] = os.path.join(engine, 'config.json')
         return js
-if __name__ == "__main__":
-    print(f">> cmd line: {' '.join(sys.argv)}")
-    args = parse_arguments()
+class Args:
+    def __init__(self) -> None:
+        pass
+    def add(self, key, value):
+        setattr(self, key, value)
+
+def main(args):
     params = get_engine_params(args.engine)
     model_name = params['name'].lower()
     engine_cfg = params['cfg_path']
-
-    if args.repo is not None:
-        args.repo = os.path.realpath(args.repo)
 
     # check engine configuration
     model = os.path.join(args.engine, 'model')
     assert os.path.exists(model)
 
-    if args.repo is None:
+    if not args.repo:
         if "llava" in model_name:
             args.repo = "/app/all_models/llava"
         else:
             args.repo = "/app/all_models/inflight_batcher_llm"
-    else:
-        assert os.path.exists(args.repo), f"repo {args.repo} not exist"
+    args.repo = os.path.realpath(args.repo)
+    assert os.path.exists(args.repo), f"repo {args.repo} not exist"
 
-    model_path = build_triton_repo(
-        args.repo, args.engine, model, model_name, engine_cfg, args.schema
-    )
+    # prepare triton parameters
+    triton = args.tritonserver if args.tritonserver else "/opt/tritonserver/bin/tritonserver"
+    triton_port = args.address.split(':')[1]
     world = get_world_size(engine_cfg, args.devices)
-    triton_port = args.http_port
-    if args.oaip != 'none':
-        triton_port += 1 # triton port is oaip port + 1
-        assert os.path.exists(args.oaip), f"oaip not found: {args.oaip}"
-        oaip = f"{args.oaip} -triton 127.0.0.1:{triton_port} -http-log-level 10 -minloglevel 1 -logtostderr -port {args.http_port} &"
+    model_path = build_triton_repo(
+        args.repo, args.engine, model, model_name, engine_cfg, args.schema, args.gpu_mem_fraction
+    )
+    cmd = get_cmd(world, triton, model_path, triton_port, args.devices)
+
+    # startup oaip if required, before triton startup
+    oaip = args.oaip if args.oaip else "/app/oaip"
+    if oaip != 'none':
+        assert os.path.exists(oaip), f"oaip not found: {oaip}"
+        oaip = f"{oaip} -config {args.config}&"
         print(">>> ", oaip)
         subprocess.call(oaip, shell=True)
-    cmd = get_cmd(world, args.tritonserver, model_path, triton_port, args.devices)
+
+    print(">>> ", cmd)
     subprocess.call(cmd, shell=True)
+
+def set_value(js, args, name, defval, *aargs):
+    """if args.name is None, load from js[*args], if still not present, use defval
+    """
+    v = getattr(args, name, None)
+    if v is not None:
+        return
+    if len(aargs) > 0:
+        v = js
+        for param in aargs:
+            v = v.get(param, None)
+            if v is None:
+                break
+    if v is None:
+        v = defval
+    setattr(args, name, v)
+    
+if __name__ == "__main__":
+    print(f">> cmd line: {' '.join(sys.argv)}")
+    args = parse_arguments()
+    assert len(args.config) > 0 and os.path.exists(args.config)
+    with open(args.config, 'r') as fp:
+        js = json.load(fp)
+    def setval(*a):
+        set_value(js, args, *a)
+    setval("gpu_mem_fraction", None, "engine", "triton", "gpuMemFraction")
+    setval("oaip", None, "sys", "oaip")
+    setval("devices", None, "sys", "devices")
+    setval("oaip", None, "sys", "oaip")
+    setval("schema", None, "engine", "triton", "schema")
+    setval("repo", None, "engine", "triton", "repo")
+    setval("engine", None, "engine", "triton", "engine")
+    setval("tritonserver", None, "engine", "triton", "tritonServer")
+    setval("address", None, "engine", "triton", "address")
+    assert args.address is not None and len(args.address) > 0
+    main(args)
+    

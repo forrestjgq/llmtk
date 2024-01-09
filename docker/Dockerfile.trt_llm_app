@@ -21,6 +21,10 @@ ENV APP_BACKEND_COMMITID=$BACKEND_COMMITID
 ENV APP_OAIP_COMMITID=$OAIP_COMMITID
 
 WORKDIR /app
+# thirdparty
+COPY thirdparty thirdparty
+RUN bash /app/thirdparty/install.sh && rm -rf /app/thirdparty
+
 COPY script llmtk_script
 COPY src llmtk_src
 COPY all_models all_models
