@@ -7,7 +7,6 @@ import pathlib
 import shutil
 import subprocess
 from pathlib import Path
-from colorama import init
 
 import torch
 from transformers import AutoTokenizer

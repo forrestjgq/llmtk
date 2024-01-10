@@ -27,6 +27,9 @@ popd
 rm -rf tmp && mkdir tmp
 
 # build oaip, it's ok to build on host and copy to image
+pushd oaip
+go generate ./...
+popd
 pushd oaip/cmd/oaip
 go build -o $root/tmp/oaip .
 popd
