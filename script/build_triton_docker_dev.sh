@@ -5,7 +5,7 @@ root=$(dirname $(dirname $(realpath $0)))
 url=$(jq -r .repo $root/docker/version.json)
 tag=$(jq -r .base $root/docker/version.json)
 baseimage=nvcr.io/nvidia/tritonserver
-basetag=23.10-py3
+basetag=23.12-py3
 
 pushd $root
 

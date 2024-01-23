@@ -188,6 +188,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema, 
         "hidden_size": str(hidden),
         "max_input_len": param["builder_config"]["max_input_len"],
         "schema": schema,
+        "model_name": model_name,
     })
     replace(
         to("postprocessing/config.pbtxt"),
@@ -290,10 +291,7 @@ def main(args):
     assert os.path.exists(model)
 
     if not args.repo:
-        if "llava" in model_name:
-            args.repo = "/app/all_models/llava"
-        else:
-            args.repo = "/app/all_models/inflight_batcher_llm"
+        args.repo = "/app/all_models/inflight_batcher_llm"
     args.repo = os.path.realpath(args.repo)
     assert os.path.exists(args.repo), f"repo {args.repo} not exist"
 
