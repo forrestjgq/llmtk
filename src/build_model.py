@@ -349,6 +349,7 @@ class Exec:
         opt.add("world_size", cfg.world())
         opt.add("tp_size", cfg.tp)
         opt.add("pp_size", cfg.pp)
+        opt.add("max_num_tokens", cfg.batch * cfg.input)
 
     def _run_cmd(self, cmd):
         self.cmds.append(cmd)

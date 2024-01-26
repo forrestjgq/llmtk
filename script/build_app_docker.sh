@@ -36,8 +36,8 @@ popd
 
 # copy files to workspace
 pushd tmp
-cp -r $root/script .
-cp -r $root/src .
+cp -r $root/script ./llmtk_script
+cp -r $root/src ./llmtk_src
 cp -r $root/backend/all_models .
 cp -r $root/oaip/thirdparty .
 

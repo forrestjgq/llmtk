@@ -23,7 +23,7 @@ ENV TRITON_BACKEND_COMMITID=$BACKEND_COMMITID
 FROM base as dgtrt_builder
 WORKDIR /app
 COPY dgtrt dgtrt
-RUN cd /app/dgtrt && mkdir -p /app/dgtrt/build && cd /app/dgtrt/build && cmake -Dpybind11_DIR=/usr/local/lib/python3.10/dist-packages/pybind11/share/cmake/pybind11 .. && make install-python-package && cd /app && rm -rf dgtrt
+RUN cd /app/dgtrt && rm -rf /app/dgtrt/build && mkdir -p /app/dgtrt/build && cd /app/dgtrt/build && cmake -Dpybind11_DIR=/usr/local/lib/python3.10/dist-packages/pybind11/share/cmake/pybind11 .. && make install-python-package && cd /app && rm -rf dgtrt
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.10/dist-packages/dgtrt:${LD_LIBRARY_PATH}
 
 FROM dgtrt_builder as trt_llm_builder

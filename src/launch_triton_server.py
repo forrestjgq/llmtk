@@ -2,14 +2,15 @@ import argparse
 import base64
 import json
 import os
+import signal
 import sys
 import pathlib
 import shutil
 import subprocess
 from pathlib import Path
+import time
 
 import torch
-from transformers import AutoTokenizer
 
 
 
@@ -240,9 +241,19 @@ def get_world_size(engine_cfg, devices):
             assert (
                 len(devids) >= world
             ), f"specified cuda devices {devices} less than world size {world}"
+            devids = devids[:world]
+        else:
+            devids = list(range(world))
 
-        return world
+        return world, devids
 
+def decide_mem_fraction(world, devids, model_name):
+    model_name = model_name.lower()
+    frac = None
+    if 'llava' in model_name:
+        # shrink fraction so that clip could be run
+        frac = 0.8
+    return frac
 
 def get_engine_cfg(engine):
     path = pathlib.Path(engine)
@@ -298,22 +309,52 @@ def main(args):
     # prepare triton parameters
     triton = args.tritonserver if args.tritonserver else "/opt/tritonserver/bin/tritonserver"
     triton_port = args.address.split(':')[1]
-    world = get_world_size(engine_cfg, args.devices)
+    world, devids = get_world_size(engine_cfg, args.devices)
+
+    if args.gpu_mem_fraction is None or args.gpu_mem_fraction < 0.1:
+        args.gpu_mem_fraction  = decide_mem_fraction(world, devids, model_name)
     model_path = build_triton_repo(
         args.repo, args.engine, model, model_name, engine_cfg, args.schema, args.gpu_mem_fraction
     )
     cmd = get_cmd(world, triton, model_path, triton_port, args.devices)
 
+    processes = {}
     # startup oaip if required, before triton startup
     oaip = args.oaip if args.oaip else "/app/oaip"
     if oaip != 'none':
         assert os.path.exists(oaip), f"oaip not found: {oaip}"
-        oaip = f"{oaip} -config {args.config}&"
+        oaip = f"{oaip} -config {args.config}"
         print(">>> ", oaip)
-        subprocess.call(oaip, shell=True)
+        processes['oaip'] = subprocess.Popen(oaip, shell=True, preexec_fn=os.setsid)
 
     print(">>> ", cmd)
-    subprocess.call(cmd, shell=True)
+    processes['triton'] = subprocess.Popen(cmd, shell=True, preexec_fn=os.setsid)
+
+    # this program monitor triton and oaip and any processes started by myself
+    # any exit subprocess will terminate everything
+    exits = False
+    try:
+        while not exits:
+            for k, v in processes.items():
+                ret = v.poll()
+                if ret is not None:
+                    print(f'subprocess {k} exited: {ret}')
+                    exits = True
+            time.sleep(3)
+    except Exception as e:
+        print(e)
+        print('now terminating everything')
+
+    for k, v in processes.items():
+        ret = v.poll()
+        if ret is None:
+            print(f'terminating {k}, pid {v.pid}')
+            try:
+                os.killpg(v.pid,signal.SIGTERM) 
+            except Exception as e:
+                print(e)
+            print(f'stop terminating')
+    
 
 def set_value(js, args, name, defval, *aargs):
     """if args.name is None, load from js[*args], if still not present, use defval

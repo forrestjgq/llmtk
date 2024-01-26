@@ -9,6 +9,9 @@ base=$(jq -r .base $root/docker/version.json)
 
 pushd $root
 
+# cleanup
+sudo rm -rf $root/trtllm/build* $root/trtllm/cpp/build* $root/backend/inflight_batcher_llm/build* $root/trtllm/tensorrt_llm/libs/*
+
 llmtk_commitid=$(git rev-parse HEAD)
 pushd trtllm
 trtllm_commitid=$(git rev-parse HEAD)

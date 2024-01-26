@@ -36,24 +36,24 @@ if [[ $build_quant -eq 1 ]]; then
    # Download and install the AMMO package from the DevZone.
    wget https://developer.nvidia.com/downloads/assets/cuda/files/nvidia-ammo/nvidia_ammo-0.5.0.tar.gz
    tar -xzf nvidia_ammo-0.5.0.tar.gz
-   pip install nvidia_ammo-0.5.0/nvidia_ammo-0.5.0-cp$python_version-cp$python_version-linux_x86_64.whl
+   pip3 install nvidia_ammo-0.5.0/nvidia_ammo-0.5.0-cp$python_version-cp$python_version-linux_x86_64.whl
    rm -rf $llmtk/nvidia_ammo*
 
    # Install the additional requirements
    pushd $root/quantization
-   pip install cython # extra dependancy
-   pip install -r requirements.txt
+   pip3 install cython # extra dependancy
+   pip3 install -r requirements.txt
    popd
 fi
 
 # for mistral model running
-pip install --upgrade flash-attn
+pip3 install --upgrade flash-attn
 # for mistral model building
-pip install pynvml
+pip3 install pynvml
 
 # for dgtrt
-pip install pybind11
-pip install pybind11-stubgen
+pip3 install pybind11
+pip3 install pybind11-stubgen
 rm -f ~/.wgetrc
 
 popd
