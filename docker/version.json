@@ -1,0 +1,9 @@
+{
+    "repo": "dockerhub.deepglint.com/lse/triton_trt_llm",
+    "base": "dev-base-0.2",
+    "base-comment": "setup develepment environment for trtllm/backend/..",
+    "triton": "triton-base-0.3",
+    "triton-comment": "install trtllm/backend",
+    "app": "dev-app-0.10",
+    "app-comment": "llmtk sources, oaip, ..."
+}

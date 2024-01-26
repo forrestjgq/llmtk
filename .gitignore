@@ -3,3 +3,5 @@ backend/tensorrt_llm
 bin
 *tar.gz
 build
+build_debug
+build_release

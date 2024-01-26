@@ -1,0 +1,21 @@
+{
+  "model": "gpt-3.5-turbo",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "What did you see in this image? and how are you feeling?"
+        },
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "/data/jgq/tmpfs/feature"
+          }
+        }
+      ]
+    }
+  ],
+  "max_tokens": 1024
+}
