@@ -466,6 +466,12 @@ def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
             raise Exception(
                 "Llava require 576 ids for each image feature, so the input size should large than that"
             )
+        # current trtllm has full support for llava, but using CPU to build engine
+        # which is extreamly slow.
+        #
+        # so we still treat llava as llama now unless trtllm using GPU to build
+        exec.add_option("model_type", "llama")
+
     qt = cfg.qt
     if qt is None:
         output_path, tmp_path = exec.make_fp16(cfg)

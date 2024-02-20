@@ -8,6 +8,7 @@ import pathlib
 import shutil
 import subprocess
 from pathlib import Path
+import threading
 import time
 
 import torch
@@ -292,6 +293,14 @@ class Args:
     def add(self, key, value):
         setattr(self, key, value)
 
+exit = threading.Event()
+
+def quit(signo, _frame):
+    print("Interrupted by %d, shutting down" % signo)
+    exit.set()
+def capture_sig():
+    for sig in ('TERM', 'HUP', 'INT'):
+        signal.signal(getattr(signal, 'SIG'+sig), quit);
 def main(args):
     params = get_engine_params(args.engine)
     model_name = params['name'].lower()
@@ -333,14 +342,15 @@ def main(args):
     # this program monitor triton and oaip and any processes started by myself
     # any exit subprocess will terminate everything
     exits = False
+    capture_sig()
     try:
-        while not exits:
+        while not exits and not exit.is_set():
             for k, v in processes.items():
                 ret = v.poll()
                 if ret is not None:
                     print(f'subprocess {k} exited: {ret}')
                     exits = True
-            time.sleep(3)
+            exit.wait(5)
     except Exception as e:
         print(e)
         print('now terminating everything')
