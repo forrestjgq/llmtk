@@ -10,6 +10,9 @@ import torch
 
 from pathlib import Path
 
+import torch
+from safetensors import safe_open
+from safetensors.torch import save_file
 
 def is_llama(model_type):
     return model_type in ["llama", "mistral", "llava"]
@@ -102,6 +105,7 @@ class Options:
         prefix = ""
         if self.devices and len(self.devices) > 0:
             prefix = f"CUDA_VISIBLE_DEVICES={self.devices} "
+
         return prefix + f"python -u {py} " + " ".join(s)
 
 
@@ -310,12 +314,21 @@ class Exec:
                     v for k, v in wmap.items() if k.startswith("model.mm_projector")
                 }
                 assert len(bins) == 1
-                w = torch.load(src / bins.pop())
+                # w = torch.load(src / bins.pop())
+                # with open(src / bins.pop()) as f:
+                # prefix = "model.mm_projector."
+                # w = {k[len(prefix) :]: v for k, v in w.items() if k.startswith(prefix)}
+                # for k in w.keys():
+                #     print("\t", k)
+                # torch.save(w, dst / "mm_projector.bin")
+                projector = {}
                 prefix = "model.mm_projector."
-                w = {k[len(prefix) :]: v for k, v in w.items() if k.startswith(prefix)}
-                for k in w.keys():
-                    print("\t", k)
-                torch.save(w, dst / "mm_projector.bin")
+                with safe_open(src / bins.pop(), framework="pt", device="cpu") as f:
+                    for key in f.keys():
+                        if key.startswith("model.mm_projector."):
+                            print(key)
+                            projector[key[len(prefix):]] = f.get_tensor(key)
+                torch.save(projector, dst / "mm_projector.bin")
         return cfg.dst_path()
 
     def _build(self, opt: Options, cfg):
@@ -462,6 +475,14 @@ def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
             js = json.load(fp)
             exec.add_option("max_input_len", js["max_position_embeddings"])
     elif cfg.model_type == "llava":
+        # hxu: llama build.py CAN load form model.dir/config.json
+        # with open(os.path.join(cfg.src, "config.json"), "r") as fp:
+        #     js = json.load(fp)
+        #     exec.add_option("n_embd", js["hidden_size"])
+        #     exec.add_option("n_head", js["num_attention_heads"])
+        #     exec.add_option("n_kv_head", js["num_key_value_heads"])
+        #     exec.add_option("n_layer", js["num_hidden_layers"])
+        #     exec.add_option("n_positions", js["max_position_embeddings"])
         if cfg.input < 576:
             raise Exception(
                 "Llava require 576 ids for each image feature, so the input size should large than that"
