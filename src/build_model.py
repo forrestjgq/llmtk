@@ -307,7 +307,7 @@ class Exec:
             if vtdst.exists():
                 shutil.rmtree(vtdst)
             shutil.copytree(vt, vtdst)
-            with open(src / "pytorch_model.bin.index.json", "r") as fp:
+            with open(src / "model.safetensors.index.json", "r") as fp:
                 js = json.load(fp)
                 wmap = js["weight_map"]
                 bins = {
@@ -475,14 +475,6 @@ def build_llama(cfg: Config, exec: Exec, tmpdir: str = None):
             js = json.load(fp)
             exec.add_option("max_input_len", js["max_position_embeddings"])
     elif cfg.model_type == "llava":
-        # hxu: llama build.py CAN load form model.dir/config.json
-        # with open(os.path.join(cfg.src, "config.json"), "r") as fp:
-        #     js = json.load(fp)
-        #     exec.add_option("n_embd", js["hidden_size"])
-        #     exec.add_option("n_head", js["num_attention_heads"])
-        #     exec.add_option("n_kv_head", js["num_key_value_heads"])
-        #     exec.add_option("n_layer", js["num_hidden_layers"])
-        #     exec.add_option("n_positions", js["max_position_embeddings"])
         if cfg.input < 576:
             raise Exception(
                 "Llava require 576 ids for each image feature, so the input size should large than that"
