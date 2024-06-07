@@ -179,7 +179,8 @@ class Exec:
         return None
 
     def make_fp8(self, qdst: str, cfg: Config):
-        qtout = self._make_fp8_qt(cfg.src, qdst, cfg)
+        # qtout = self._make_fp8_qt(cfg.src, qdst, cfg)
+        qtout = self._make_fp8_qt(cfg.src, qdst)
         if qtout is None:
             return None, None
         opt = self._new_option()
@@ -307,28 +308,37 @@ class Exec:
             if vtdst.exists():
                 shutil.rmtree(vtdst)
             shutil.copytree(vt, vtdst)
-            with open(src / "model.safetensors.index.json", "r") as fp:
-                js = json.load(fp)
-                wmap = js["weight_map"]
-                bins = {
-                    v for k, v in wmap.items() if k.startswith("model.mm_projector")
-                }
-                assert len(bins) == 1
-                # w = torch.load(src / bins.pop())
-                # with open(src / bins.pop()) as f:
-                # prefix = "model.mm_projector."
-                # w = {k[len(prefix) :]: v for k, v in w.items() if k.startswith(prefix)}
-                # for k in w.keys():
-                #     print("\t", k)
-                # torch.save(w, dst / "mm_projector.bin")
-                projector = {}
-                prefix = "model.mm_projector."
-                with safe_open(src / bins.pop(), framework="pt", device="cpu") as f:
-                    for key in f.keys():
-                        if key.startswith("model.mm_projector."):
-                            print(key)
-                            projector[key[len(prefix):]] = f.get_tensor(key)
-                torch.save(projector, dst / "mm_projector.bin")
+            print(f'{cfg.model_name}, load projector json')
+            if '1.5' in cfg.model_name:
+                with open(src / "pytorch_model.bin.index.json", "r") as fp:
+                    js = json.load(fp)
+                    wmap = js["weight_map"]
+                    bins = {
+                        v for k, v in wmap.items() if k.startswith("model.mm_projector")
+                    }
+                    assert len(bins) == 1
+                    w = torch.load(src / bins.pop())
+                    prefix = "model.mm_projector."
+                    w = {k[len(prefix) :]: v for k, v in w.items() if k.startswith(prefix)}
+                    for k in w.keys():
+                        print("\t", k)
+                    torch.save(w, dst / "mm_projector.bin")
+            else:
+                with open(src / "model.safetensors.index.json", "r") as fp:
+                    js = json.load(fp)
+                    wmap = js["weight_map"]
+                    bins = {
+                        v for k, v in wmap.items() if k.startswith("model.mm_projector")
+                    }
+                    assert len(bins) == 1
+                    projector = {}
+                    prefix = "model.mm_projector."
+                    with safe_open(src / bins.pop(), framework="pt", device="cpu") as f:
+                        for key in f.keys():
+                            if key.startswith("model.mm_projector."):
+                                print(key)
+                                projector[key[len(prefix):]] = f.get_tensor(key)
+                    torch.save(projector, dst / "mm_projector.bin")
         return cfg.dst_path()
 
     def _build(self, opt: Options, cfg):
