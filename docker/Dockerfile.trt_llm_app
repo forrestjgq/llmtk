@@ -22,6 +22,7 @@ ENV APP_OAIP_COMMITID=$OAIP_COMMITID
 
 WORKDIR /app
 COPY . .
+RUN rm -r /app/tensorrt_llm/examples && mv /app/examples /app/tensorrt_llm/
 RUN bash /app/thirdparty/install.sh && rm -rf /app/thirdparty
 
 ENV http_proxy=""
