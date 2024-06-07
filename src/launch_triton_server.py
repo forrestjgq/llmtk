@@ -161,7 +161,10 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema, 
         if not schema:
             schema = "vision_tower"
         if schema == "vision_tower":
-            inst_cnt = 2
+            if '34b' in model_name.lower():
+                inst_cnt = 1
+            else:
+                inst_cnt = 2
             inst_type = 'KIND_GPU'
         elif schema == "input_feature":
             inst_cnt = 8
@@ -206,7 +209,7 @@ def build_triton_repo(repo, engine, model, model_name, engine_cfg_path, schema, 
         "${engine_dir}": engine,
         "${exclude_input_in_output}": "False",
         "${triton_max_batch_size}": max_batch_size,
-        "${max_queue_delay_microseconds}": 50000,
+        "${max_queue_delay_microseconds}": 100,
     }
     if gpu_mem_fraction and gpu_mem_fraction > 0 and gpu_mem_fraction < 1.0:
         trtllm_dict["${kv_cache_free_gpu_mem_fraction}"] = gpu_mem_fraction
