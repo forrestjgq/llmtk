@@ -40,6 +40,7 @@ cp -r $root/script ./llmtk_script
 cp -r $root/src ./llmtk_src
 cp -r $root/backend/all_models .
 cp -r $root/oaip/thirdparty .
+cp -r $root/trtllm/examples/ .
 
 extra_args=""
 if [ ! -z $http_proxy ]; then
