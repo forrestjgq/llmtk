@@ -25,5 +25,9 @@ COPY . .
 RUN rm -r /app/tensorrt_llm/examples && mv /app/examples /app/tensorrt_llm/
 RUN bash /app/thirdparty/install.sh && rm -rf /app/thirdparty
 
+RUN pip config set global.index-url http://mirrors.cloud.tencent.com/pypi/simple
+RUN pip config set global.trusted-host mirrors.cloud.tencent.com
+RUN cd vllm && pip install .
+
 ENV http_proxy=""
 ENV https_proxy=""
